@@ -1,0 +1,16 @@
+apiVersion: 1
+
+datasources:
+  - name: InfluxDB-Museum
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8086
+    isDefault: true
+    jsonData:
+      version: Flux
+      organization: myorg
+      defaultBucket: museum_data
+      tlsSkipVerify: true
+    secureJsonData:
+      token: my-super-token
+    editable: true
