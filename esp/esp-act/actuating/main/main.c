@@ -13,9 +13,10 @@ static const char *E_TAG = "MAIN";
 TaskHandle_t ambientLighTaskHandle = NULL;
 TaskHandle_t impactTaskHandle = NULL;
 TaskHandle_t theftTaskHandle = NULL;
+TaskHandle_t resetTaskHandle = NULL;
 
 SemaphoreHandle_t ambientLightMutex = NULL;
-int ambientBrightness = 20;
+int ambientBrightness = 0;
 
 static httpd_handle_t server = NULL;
 
@@ -64,11 +65,13 @@ void app_main(void)
 
     /* Task Creation */
     xTaskCreate(taskAmbientLight, "Ambiental Light", 2048, NULL, 1, &ambientLighTaskHandle);
-    xTaskCreate(taskImpactLight, "Impact Warning", 2048, NULL, 4, &impactTaskHandle);
-    xTaskCreate(taskTheftLight, "Theft Warning", 2048, NULL, 5, &theftTaskHandle);
+    xTaskCreate(taskImpactLight, "Impact Warning", 2048, NULL, 3, &impactTaskHandle);
+    xTaskCreate(taskTheftLight, "Theft Warning", 2048, NULL, 4, &theftTaskHandle);
+    xTaskCreate(taskResetLight, "Lights reset", 2048, NULL, 5, &resetTaskHandle);
     
 }
 
+// Normalizes ESP-REC value between [0,100] in ambientLight_post_handler
 void taskAmbientLight(void *pvParameters){
     // non mi piace dichiarata qua dentro
     int localBrightness = 20;
@@ -117,3 +120,13 @@ void taskTheftLight(void *pvParameters){
     }
 }
 
+void taskResetLight(void *pvParameters){
+    while(1){
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        ESP_LOGI("RESET", "Reset alarm light received!");
+
+        // Implementa la logica per resettare i task Theft e Impact
+        // e spegnere il led rosso
+        //gpio_set_level(LED_THEFT_IMPACT_PIN, 0);
+    }
+}

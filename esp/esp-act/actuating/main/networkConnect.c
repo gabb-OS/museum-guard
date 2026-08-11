@@ -126,7 +126,7 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-// BEA AWARE: this is still to check
+// BE AWARE: this is still to check
 static esp_err_t ambientLight_post_handler(httpd_req_t *req)
 {
     char buf[128];
@@ -207,6 +207,17 @@ static esp_err_t theft_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t reset_post_handler(httpd_req_t *req)
+{
+    xTaskNotifyGive(resetTaskHandle);
+    char *resp = create_json();
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, resp);
+    free(resp);
+    return ESP_OK;
+}
+
 
 
 httpd_handle_t start_webserver(void)
@@ -224,7 +235,7 @@ httpd_handle_t start_webserver(void)
         };
 
         httpd_uri_t ambientLight_uri = {
-            .uri       = "/light",
+            .uri       = "/ambientlight",
             .method    = HTTP_POST,
             .handler   = ambientLight_post_handler,
             .user_ctx  = NULL
@@ -245,11 +256,19 @@ httpd_handle_t start_webserver(void)
             .user_ctx  = NULL
         };
 
+        httpd_uri_t reset_uri = {
+            .uri       = "/reset",
+            .method    = HTTP_POST,
+            .handler   = reset_post_handler,
+            .user_ctx  = NULL
+        };
+
 
         httpd_register_uri_handler(server_handle, &root_uri);
         httpd_register_uri_handler(server_handle, &ambientLight_uri);
         httpd_register_uri_handler(server_handle, &impact_uri);
         httpd_register_uri_handler(server_handle, &theft_uri);
+        httpd_register_uri_handler(server_handle, &reset_uri);
         
         ESP_LOGI(TAG, "Web server started");
         return server_handle;

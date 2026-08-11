@@ -17,6 +17,7 @@ extern SemaphoreHandle_t ambientLightMutex;
 extern TaskHandle_t ambientLighTaskHandle;
 extern TaskHandle_t impactTaskHandle;
 extern TaskHandle_t theftTaskHandle;
+extern TaskHandle_t resetTaskHandle;
 
 /* ---------------- Shared Vars ---------------- */
 extern int ambientBrightness;
@@ -25,6 +26,7 @@ extern int ambientBrightness;
 void taskAmbientLight(void *pvParameters);
 void taskImpactLight(void *pvParameters);
 void taskTheftLight(void *pvParameters);
+void taskResetLight(void *pvParameters);
 
 /* ---------------- Networking (definiti in networkConnect.c) ---------------- */
 void wifi_init_sta(void);
