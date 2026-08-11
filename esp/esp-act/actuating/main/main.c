@@ -10,7 +10,7 @@
 #include "shared.h"
 
 static const char *E_TAG = "MAIN";
-TaskHandle_t ambientLighTaskHandle = NULL;
+TaskHandle_t ambientLightTaskHandle = NULL;
 TaskHandle_t impactTaskHandle = NULL;
 TaskHandle_t theftTaskHandle = NULL;
 TaskHandle_t resetTaskHandle = NULL;
@@ -64,7 +64,7 @@ void app_main(void)
 
 
     /* Task Creation */
-    xTaskCreate(taskAmbientLight, "Ambiental Light", 2048, NULL, 1, &ambientLighTaskHandle);
+    xTaskCreate(taskAmbientLight, "Ambiental Light", 2048, NULL, 1, &ambientLightTaskHandle);
     xTaskCreate(taskImpactLight, "Impact Warning", 2048, NULL, 3, &impactTaskHandle);
     xTaskCreate(taskTheftLight, "Theft Warning", 2048, NULL, 4, &theftTaskHandle);
     xTaskCreate(taskResetLight, "Lights reset", 2048, NULL, 5, &resetTaskHandle);
