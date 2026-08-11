@@ -172,7 +172,7 @@ static esp_err_t ambientLight_post_handler(httpd_req_t *req)
             xSemaphoreGive(ambientLightMutex);
         }
 
-        xTaskNotifyGive(ambientLighTaskHandle);
+        xTaskNotifyGive(ambientLightTaskHandle);
  
         httpd_resp_set_type(req, "application/json");
         httpd_resp_sendstr(req, "{\"status\":\"ok\"}");

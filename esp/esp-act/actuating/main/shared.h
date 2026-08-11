@@ -14,7 +14,7 @@
 
 /* ---------------- Handle condivisi (definiti in main.c) ---------------- */
 extern SemaphoreHandle_t ambientLightMutex;
-extern TaskHandle_t ambientLighTaskHandle;
+extern TaskHandle_t ambientLightTaskHandle;
 extern TaskHandle_t impactTaskHandle;
 extern TaskHandle_t theftTaskHandle;
 extern TaskHandle_t resetTaskHandle;
@@ -27,6 +27,7 @@ void taskAmbientLight(void *pvParameters);
 void taskImpactLight(void *pvParameters);
 void taskTheftLight(void *pvParameters);
 void taskResetLight(void *pvParameters);
+
 
 /* ---------------- Networking (definiti in networkConnect.c) ---------------- */
 void wifi_init_sta(void);
