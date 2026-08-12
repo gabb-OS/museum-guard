@@ -6,20 +6,40 @@
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/timers.h"
 
 #include "shared.h"
 
 static const char *E_TAG = "MAIN";
+
 TaskHandle_t ambientLightTaskHandle = NULL;
+TaskHandle_t ledManagerTaskHandle = NULL;
 TaskHandle_t impactTaskHandle = NULL;
 TaskHandle_t theftTaskHandle = NULL;
 TaskHandle_t resetTaskHandle = NULL;
+
+TimerHandle_t impactTimer = NULL;
 
 SemaphoreHandle_t ambientLightMutex = NULL;
 int ambientBrightness = 0;
 
 static httpd_handle_t server = NULL;
 
+#define CMD_BIT_RESET  (1 << 0)     // Bit 0: 0001
+#define CMD_BIT_THEFT  (1 << 1)     // Bit 1: 0010
+#define CMD_BIT_IMPACT (1 << 2)     // Bit 2: 0100
+#define CMD_BIT_TIMEOUT (1 << 3)    // Bit 2: 1000
+
+typedef enum {
+    STATE_IDLE,
+    STATE_IMPACT,
+    STATE_THEFT
+} alarm_state_t;
+
+void taskAlarmLedManager(void *pvParameters);
+void impactTimerCallback(TimerHandle_t xTimer);
+
+/************* Main *************/
 void app_main(void)
 {
     /* Network/webserver initialization*/
@@ -39,9 +59,18 @@ void app_main(void)
 
     /* Initialization */
     gpio_set_direction(LED_THEFT_IMPACT_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(LED_THEFT_IMPACT_PIN, 0);
+
     gpio_set_direction(LED_AMBIENT_PIN, GPIO_MODE_OUTPUT);
     ambientLightMutex = xSemaphoreCreateMutex();
-    //int localBrightness = 20;
+
+    impactTimer = xTimerCreate(
+        "ImpactTmr",
+        pdMS_TO_TICKS(20000),
+        pdFALSE,
+        (void *)0,
+        impactTimerCallback
+    );
 
     ledc_timer_config_t timer_conf = {
         .speed_mode      = LEDC_LOW_SPEED_MODE,
@@ -65,15 +94,15 @@ void app_main(void)
 
     /* Task Creation */
     xTaskCreate(taskAmbientLight, "Ambiental Light", 2048, NULL, 1, &ambientLightTaskHandle);
+    xTaskCreate(taskAlarmLedManager, "Alarm LED Mgr", 2048, NULL, 5, &ledManagerTaskHandle);
     xTaskCreate(taskImpactLight, "Impact Warning", 2048, NULL, 3, &impactTaskHandle);
     xTaskCreate(taskTheftLight, "Theft Warning", 2048, NULL, 4, &theftTaskHandle);
-    xTaskCreate(taskResetLight, "Lights reset", 2048, NULL, 5, &resetTaskHandle);
+    xTaskCreate(taskResetLight, "Lights reset", 2048, NULL, 4, &resetTaskHandle);
     
 }
 
 // Normalizes ESP-REC value between [0,100] in ambientLight_post_handler
 void taskAmbientLight(void *pvParameters){
-    // non mi piace dichiarata qua dentro
     int localBrightness = 20;
 
     while(1){
@@ -84,49 +113,98 @@ void taskAmbientLight(void *pvParameters){
             localBrightness = ambientBrightness;
             xSemaphoreGive(ambientLightMutex);
         }
-
-
         uint32_t duty = (localBrightness * 255) / 100;
         ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
         ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
-
-
     }
 
 }
 
-void taskImpactLight(void *pvParameters){
-    while(1){
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        ESP_LOGI("IMPACT", "Impact event received!");
+void taskAlarmLedManager(void *pvParameters) {
+    alarm_state_t state = STATE_IDLE;
+    uint32_t notified_bits; 
+    bool is_led_on = false;
 
-        // 20 seconds blinking
-        TickType_t alarmEnd = xTaskGetTickCount() + pdMS_TO_TICKS(20000);
-        while (xTaskGetTickCount() < alarmEnd) {
-            gpio_set_level(LED_THEFT_IMPACT_PIN, 1);
-            vTaskDelay(pdMS_TO_TICKS(800));
-            gpio_set_level(LED_THEFT_IMPACT_PIN, 0);
-            vTaskDelay(pdMS_TO_TICKS(200));
+    while (1) {
+        TickType_t wait_time = portMAX_DELAY;
+
+        if (state == STATE_IMPACT) {
+            wait_time = is_led_on ? pdMS_TO_TICKS(800) : pdMS_TO_TICKS(200);
+        }
+
+        BaseType_t notification_received = xTaskNotifyWait(
+            0x00,           
+            0xFFFFFFFF,      
+            &notified_bits,
+            wait_time   
+        );
+
+        if (notification_received == pdTRUE) {
+            
+            if (notified_bits & CMD_BIT_RESET) {
+                state = STATE_IDLE;
+                gpio_set_level(LED_THEFT_IMPACT_PIN, 0);
+                xTimerStop(impactTimer, 0); 
+            } 
+
+            else if (notified_bits & CMD_BIT_THEFT) {
+                state = STATE_THEFT;
+                gpio_set_level(LED_THEFT_IMPACT_PIN, 1);
+                xTimerStop(impactTimer, 0); 
+            } 
+            
+            else if (notified_bits & CMD_BIT_IMPACT) {
+                if (state != STATE_THEFT) {
+                    state = STATE_IMPACT;
+                    is_led_on = true;
+                    gpio_set_level(LED_THEFT_IMPACT_PIN, 1);
+                    xTimerStart(impactTimer, 0); 
+                }
+            }
+            
+            else if (notified_bits & CMD_BIT_TIMEOUT) {
+                if (state == STATE_IMPACT) {
+                    state = STATE_IDLE;
+                    gpio_set_level(LED_THEFT_IMPACT_PIN, 0);
+                }
+            }
+
+        } else {
+            if (state == STATE_IMPACT) {
+                is_led_on = !is_led_on;
+                gpio_set_level(LED_THEFT_IMPACT_PIN, is_led_on ? 1 : 0);
+            }
         }
     }
 }
 
+void taskImpactLight(void *pvParameters){
+
+    while(1){
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        ESP_LOGI("IMPACT", "Impact event received!");
+        xTaskNotify(ledManagerTaskHandle, CMD_BIT_IMPACT, eSetBits);
+    }
+}
+
 void taskTheftLight(void *pvParameters){
+
     while(1){
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         ESP_LOGI("THEFT", "Theft event received!");
-
-        gpio_set_level(LED_THEFT_IMPACT_PIN, 1);
+        xTaskNotify(ledManagerTaskHandle, CMD_BIT_THEFT, eSetBits);
     }
 }
 
 void taskResetLight(void *pvParameters){
+
     while(1){
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         ESP_LOGI("RESET", "Reset alarm light received!");
-
-        // Implementa la logica per resettare i task Theft e Impact
-        // e spegnere il led rosso
-        //gpio_set_level(LED_THEFT_IMPACT_PIN, 0);
+        xTaskNotify(ledManagerTaskHandle, CMD_BIT_RESET, eSetBits);
     }
+}
+
+void impactTimerCallback(TimerHandle_t xTimer) {
+    xTaskNotify(ledManagerTaskHandle, CMD_BIT_TIMEOUT, eSetBits);
 }
