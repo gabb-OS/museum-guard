@@ -21,8 +21,8 @@
 #include "shared.h"
 
 // CUSTOMIZE
-#define WIFI_SSID          "Gaperol"
-#define WIFI_PASSWORD      "s3ssoEsamb4"
+#define WIFI_SSID          CONFIG_WIFI_SSID
+#define WIFI_PASSWORD      CONFIG_WIFI_PASSWORD
 
 #define DEVICE_ID           "ESP_ACT"
 
