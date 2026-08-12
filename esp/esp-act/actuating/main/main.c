@@ -95,7 +95,7 @@ void app_main(void)
     xTaskCreate(taskTheftLight, "Theft Warning", 2048, NULL, 4, &theftTaskHandle);
     xTaskCreate(taskResetLight, "Lights reset", 2048, NULL, 4, &resetTaskHandle);
     
-    xTaskNotify(ambientLightTaskHandle, 50, eSetValueWithOverwrite);
+    xTaskNotify(ambientLightTaskHandle, 30, eSetValueWithOverwrite);
 }
 
 // Normalizes ESP-REC value between [0,100] in ambientLight_post_handler
@@ -171,6 +171,9 @@ void taskAlarmLedManager(void *pvParameters) {
     }
 }
 
+/*  Technically speaking, those 3 tasks are not necessary and occupy resorces
+    This decoupling is made to give a logical structure and 
+    to prepare the bed for future added features in the single tasks */
 void taskImpactLight(void *pvParameters){
 
     while(1){

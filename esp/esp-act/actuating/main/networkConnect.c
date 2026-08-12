@@ -32,10 +32,7 @@ static EventGroupHandle_t wifi_event_group;
 static const int WIFI_CONNECTED_BIT = BIT0;
 
 /* ---------------- Wi-Fi management ---------------- */
-static void wifi_event_handler(void *arg,
-                               esp_event_base_t event_base,
-                               int32_t event_id,
-                               void *event_data)
+static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         ESP_LOGI(TAG, "Wi-Fi started, connecting...");
@@ -99,6 +96,31 @@ void wifi_init_sta(void)
 }
 
 /* ---------------- Helper functions ---------------- */
+static esp_err_t send_json_response(httpd_req_t *req, const char *status, const char *message)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "id", DEVICE_ID);
+    cJSON_AddStringToObject(root, "status", status);
+    
+    if (message != NULL) {
+        cJSON_AddStringToObject(root, "message", message);
+    }
+
+    char *json_string = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+
+    if (json_string == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for JSON response");
+        return httpd_resp_send_500(req);
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = httpd_resp_sendstr(req, json_string);
+    free(json_string);
+    
+    return err;
+}
+
 
 char* create_json(void)
 {
@@ -118,12 +140,7 @@ char* create_json(void)
 
 static esp_err_t root_get_handler(httpd_req_t *req)
 {
-    const char *resp =
-        "ESP32 Web Server is running.\n";
-
-    httpd_resp_set_type(req, "text/plain");
-    httpd_resp_sendstr(req, resp);
-    return ESP_OK;
+    return send_json_response(req, "ok", "ESP32 Web Server is running");
 }
 
 // BE AWARE: this is still to check
@@ -133,7 +150,7 @@ static esp_err_t ambientLight_post_handler(httpd_req_t *req)
     int total_len = req->content_len;
  
     if (total_len <= 0 || total_len >= (int)sizeof(buf)) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Payload mancante o troppo grande");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Payload missing or too large");
         return ESP_FAIL;
     }
 
@@ -145,10 +162,8 @@ static esp_err_t ambientLight_post_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
     buf[received] = '\0';
+
     int brightness = 0;
- 
-    ESP_LOGI(TAG, "Notifica ambient ricevuta: %s", buf);
- 
     bool valid = false;
     
     cJSON *json = cJSON_Parse(buf);
@@ -161,56 +176,36 @@ static esp_err_t ambientLight_post_handler(httpd_req_t *req)
         cJSON_Delete(json);
     }
 
-
-
-    if (valid) {
-        if (brightness < 0)   brightness = 0;
-        if (brightness > 100) brightness = 100;
- 
-        xTaskNotify(ambientLightTaskHandle, (uint32_t)brightness, eSetValueWithOverwrite);
-        
-        httpd_resp_set_type(req, "application/json");
-        httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
-    } else {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
-                             "JSON non valido, atteso {\"brightness\": 0-100}");
+    if (!valid) {
+        ESP_LOGW(TAG, "Invalid JSON format received");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON, expected {\"brightness\": 0-100}");
+        return ESP_FAIL;
     }
- 
-    return ESP_OK;
 
+    if (brightness < 0)   brightness = 0;
+    if (brightness > 100) brightness = 100;
+
+    xTaskNotify(ambientLightTaskHandle, (uint32_t)brightness, eSetValueWithOverwrite);
+    
+    return send_json_response(req, "ok", "Brightness updated");
 }
 
 static esp_err_t impact_post_handler(httpd_req_t *req)
 {
     xTaskNotifyGive(impactTaskHandle);
-    char *resp = create_json();
-
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, resp);
-    free(resp);
-    return ESP_OK;
+    return send_json_response(req, "ok", "Impact alarm triggered");
 }
 
 static esp_err_t theft_post_handler(httpd_req_t *req)
 {
     xTaskNotifyGive(theftTaskHandle);
-    char *resp = create_json();
-
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, resp);
-    free(resp);
-    return ESP_OK;
+    return send_json_response(req, "ok", "Theft alarm triggered");
 }
 
 static esp_err_t reset_post_handler(httpd_req_t *req)
 {
     xTaskNotifyGive(resetTaskHandle);
-    char *resp = create_json();
-
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, resp);
-    free(resp);
-    return ESP_OK;
+    return send_json_response(req, "ok", "Alarms reset");
 }
 
 
@@ -228,36 +223,30 @@ httpd_handle_t start_webserver(void)
             .handler   = root_get_handler,
             .user_ctx  = NULL
         };
-
         httpd_uri_t ambientLight_uri = {
             .uri       = "/ambientlight",
             .method    = HTTP_POST,
             .handler   = ambientLight_post_handler,
             .user_ctx  = NULL
         };
-
-
         httpd_uri_t impact_uri = {
             .uri       = "/impact",
             .method    = HTTP_POST,
             .handler   = impact_post_handler,
             .user_ctx  = NULL
         };
-
         httpd_uri_t theft_uri = {
             .uri       = "/theft",
             .method    = HTTP_POST,
             .handler   = theft_post_handler,
             .user_ctx  = NULL
         };
-
         httpd_uri_t reset_uri = {
             .uri       = "/reset",
             .method    = HTTP_POST,
             .handler   = reset_post_handler,
             .user_ctx  = NULL
         };
-
 
         httpd_register_uri_handler(server_handle, &root_uri);
         httpd_register_uri_handler(server_handle, &ambientLight_uri);
