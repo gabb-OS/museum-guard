@@ -20,9 +20,6 @@ TaskHandle_t resetTaskHandle = NULL;
 
 TimerHandle_t impactTimer = NULL;
 
-SemaphoreHandle_t ambientLightMutex = NULL;
-int ambientBrightness = 0;
-
 static httpd_handle_t server = NULL;
 
 #define CMD_BIT_RESET  (1 << 0)     // Bit 0: 0001
@@ -62,7 +59,6 @@ void app_main(void)
     gpio_set_level(LED_THEFT_IMPACT_PIN, 0);
 
     gpio_set_direction(LED_AMBIENT_PIN, GPIO_MODE_OUTPUT);
-    ambientLightMutex = xSemaphoreCreateMutex();
 
     impactTimer = xTimerCreate(
         "ImpactTmr",
@@ -99,21 +95,18 @@ void app_main(void)
     xTaskCreate(taskTheftLight, "Theft Warning", 2048, NULL, 4, &theftTaskHandle);
     xTaskCreate(taskResetLight, "Lights reset", 2048, NULL, 4, &resetTaskHandle);
     
+    xTaskNotify(ambientLightTaskHandle, 50, eSetValueWithOverwrite);
 }
 
 // Normalizes ESP-REC value between [0,100] in ambientLight_post_handler
 void taskAmbientLight(void *pvParameters){
-    int localBrightness = 20;
+    uint32_t brightness;
 
     while(1){
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        xTaskNotifyWait(0x00, 0xFFFFFFFF, &brightness, portMAX_DELAY);
         ESP_LOGI("LIGHT", "Artwork illumination change event received!");
 
-        if (xSemaphoreTake(ambientLightMutex, portMAX_DELAY) == pdTRUE){
-            localBrightness = ambientBrightness;
-            xSemaphoreGive(ambientLightMutex);
-        }
-        uint32_t duty = (localBrightness * 255) / 100;
+        uint32_t duty = (brightness * 255) / 100;
         ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
         ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
     }

@@ -167,13 +167,8 @@ static esp_err_t ambientLight_post_handler(httpd_req_t *req)
         if (brightness < 0)   brightness = 0;
         if (brightness > 100) brightness = 100;
  
-        if (xSemaphoreTake(ambientLightMutex, portMAX_DELAY) == pdTRUE) {
-            ambientBrightness = brightness;
-            xSemaphoreGive(ambientLightMutex);
-        }
-
-        xTaskNotifyGive(ambientLightTaskHandle);
- 
+        xTaskNotify(ambientLightTaskHandle, (uint32_t)brightness, eSetValueWithOverwrite);
+        
         httpd_resp_set_type(req, "application/json");
         httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
     } else {
