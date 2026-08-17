@@ -69,6 +69,8 @@ void coap_register_observable_resource(const char *path, coap_method_handler_t h
 bool coap_push_event(const void *data, size_t len) {
     if (len > COAP_EVENT_MAX_LEN || !g_event_queue) return false;
 
+     ESP_LOGI(TAG, "Event pushed: %.*s", (int)len, (const char *)data);
+
     coap_event_msg_t msg;
     memcpy(msg.data, data, len);
     msg.len = len;
@@ -99,6 +101,7 @@ void coap_server_task(void *pvParameters) {
         if (notif > 0) {
             coap_event_msg_t msg;
             while (xQueueReceive(g_event_queue, &msg, 0) == pdTRUE) {
+                ESP_LOGI(TAG, "Notifying observers: %.*s", (int)msg.len, (const char *)msg.data);
                 memcpy(g_last_event_data, msg.data, msg.len);
                 g_last_event_len = msg.len;
                 if (g_events_resource) {

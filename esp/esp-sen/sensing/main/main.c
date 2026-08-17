@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "driver/adc.h"
 #include "nvs_flash.h"
 #include "mylib/accelerometer.h"
@@ -34,8 +35,8 @@ static SemaphoreHandle_t g_theft_mutex;
 
 //photoresistor stuff
 #define LIGHT_SENS ADC1_CHANNEL_6
-#define LIGHT_RAW_MIN             200
-#define LIGHT_RAW_MAX             3500
+#define LIGHT_RAW_MIN             1000
+#define LIGHT_RAW_MAX             4095
 static float g_light_percent = 0.0f;
 SemaphoreHandle_t g_light_mutex;
 
@@ -48,13 +49,15 @@ static float sum_ax = 0, sum_ay = 0, sum_az = 0;
 static int sample_count = 0;
 static SemaphoreHandle_t g_accel_mutex;
 static float g_avg_ax = 0, g_avg_ay = 0, g_avg_az = 0; 
-#define IMPACT_THRESHOLD    0.3f
+#define IMPACT_THRESHOLD    0.4f
 //THEFT
-#define THEFT_DISPLACEMENT_THRESHOLD 0.5f   // soglia di spostamento significativo
-#define THEFT_CONFIRM_SAMPLES        20     // persistenza richiesta per confermare
-static float baseline_ay = 0;
+#define THEFT_DISPLACEMENT_THRESHOLD 0.35f  // soglia di spostamento significativo
+#define THEFT_CONFIRM_SAMPLES        6     // persistenza richiesta per confermare
+static float baseline_ax = 0;   // era baseline_ay-> SENSORE MONTATO DRITTO
 static bool  baseline_set = false;
 static int   theft_counter = 0;
+#define THEFT_COOLDOWN_MS 3000
+static int64_t last_theft_trigger_us = 0;
 
 void read_light_sensor(void *pvParameters) {
     while (1) {
@@ -80,9 +83,9 @@ void read_light_sensor(void *pvParameters) {
     }
 }
 
-void calibrate_theft_baseline(float ay) {
+void calibrate_theft_baseline(float ax) {
     xSemaphoreTake(g_theft_mutex, portMAX_DELAY);
-    baseline_ay = ay;
+    baseline_ax = ax;
     baseline_set = true;
     xSemaphoreGive(g_theft_mutex);
 }
@@ -92,7 +95,8 @@ void read_accelerometer_sensor(void *pvParameters) {
     float last_ax = 0, last_ay = 0, last_az = 0;
     float diff_x, diff_y;
     read_accel(&last_ax, &last_ay, &last_az);  // prima lettura per inizializzare i "last"
-    calibrate_theft_baseline(last_ay);
+    calibrate_theft_baseline(last_ax); 
+
     while (1) {
         if (read_accel(&ax, &ay, &az)) {
             diff_x = ax - last_ax; //backword differencies for first derivative
@@ -110,20 +114,28 @@ void read_accelerometer_sensor(void *pvParameters) {
 
             xSemaphoreTake(g_theft_mutex, portMAX_DELAY);
             if (baseline_set) {
-                float displacement = ay - baseline_ay;
+                float displacement = ax - baseline_ax;   // era ay - baseline_ay
                 if (fabs(displacement) > THEFT_DISPLACEMENT_THRESHOLD) {
-                    theft_counter++;
-                    if (theft_counter >= THEFT_CONFIRM_SAMPLES) {
+                    theft_counter += 2;
+                    if (theft_counter > 50) theft_counter = 50;
+                } else {
+                    theft_counter -= 1;
+                    if (theft_counter < 0) theft_counter = 0;
+                }
+                if (theft_counter >= THEFT_CONFIRM_SAMPLES) {
+                    int64_t now_us = esp_timer_get_time();
+                    if (now_us - last_theft_trigger_us > (int64_t)THEFT_COOLDOWN_MS * 1000) {
                         char event_buf[64];
                         int elen = snprintf(event_buf, sizeof(event_buf),
-                                            "{\"type\":\"theft\",\"axis\":\"y\",\"value\":%.3f}", displacement);
+                                            "{\"type\":\"theft\",\"axis\":\"x\",\"value\":%.3f}", displacement);
                         coap_push_event(event_buf, elen);
 
                         xSemaphoreTake(g_alarm_mutex, portMAX_DELAY);
                         g_theft_alarm = true;
                         xSemaphoreGive(g_alarm_mutex);
+
+                        last_theft_trigger_us = now_us;
                     }
-                } else {
                     theft_counter = 0;
                 }
             }
@@ -171,14 +183,17 @@ void gps_ping_task(void *pvParameters) {
         if (alarm) {
             float lat, lon;
             if (read_gps(&lat, &lon)) {
+                ESP_LOGI("GPS_TASK", "Fix GPS: lat=%.6f lon=%.6f", lat, lon);
                 char event_buf[64];
                 int elen = snprintf(event_buf, sizeof(event_buf),
                                     "{\"type\":\"position\",\"lat\":%.6f,\"lon\":%.6f}", lat, lon);
                 coap_push_event(event_buf, elen);
+            } else {
+                ESP_LOGW("GPS_TASK", "Nessun fix GPS disponibile");
             }
             vTaskDelay(pdMS_TO_TICKS(GPS_PING_INTERVAL_MS));
         } else {
-            vTaskDelay(pdMS_TO_TICKS(500)); // poll più rado quando non c'è allarme
+            vTaskDelay(pdMS_TO_TICKS(500));
         }
     }
 }
@@ -233,9 +248,9 @@ static void hnd_put_reset_alarm(coap_resource_t *resource, coap_session_t *sessi
     xSemaphoreGive(g_theft_mutex);
 
     xSemaphoreTake(g_accel_mutex, portMAX_DELAY);
-    float current_ay = g_avg_ay;
+    float current_ax = g_avg_ax;
     xSemaphoreGive(g_accel_mutex);
-    calibrate_theft_baseline(current_ay);
+    calibrate_theft_baseline(current_ax);
 
     coap_pdu_set_code(response, COAP_RESPONSE_CODE_CHANGED); // 2.04
 }
@@ -278,7 +293,7 @@ void app_main(void){
     coap_register_put_resource("reset_alarm", hnd_put_reset_alarm);
 
     xTaskCreate(coap_server_task, "coap_task", 4096, NULL, 5, NULL);
-    xTaskCreate(read_accelerometer_sensor, "acceleromete_task", 2048, NULL, 5, NULL);
+    xTaskCreate(read_accelerometer_sensor, "acceleromete_task", 4096, NULL, 5, NULL);
     xTaskCreate(read_light_sensor, "light_task", 2048, NULL, 4, NULL);
     xTaskCreate(gps_ping_task, "gps_task", 4096, NULL, 4, NULL);
     xTaskCreate(accel_avg_task, "accel_avg_task", 2048, NULL, 3, NULL);
