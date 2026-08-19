@@ -126,45 +126,6 @@ static esp_err_t send_json_response(httpd_req_t *req, const char *status, const 
     return send_cjson_response(req, root);
 }
 
-/*static esp_err_t send_json_response(httpd_req_t *req, const char *status, const char *message)
-{
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "id", DEVICE_ID);
-    cJSON_AddStringToObject(root, "status", status);
-    
-    if (message != NULL) {
-        cJSON_AddStringToObject(root, "message", message);
-    }
-
-    char *json_string = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-
-    if (json_string == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for JSON response");
-        return httpd_resp_send_500(req);
-    }
-
-    httpd_resp_set_type(req, "application/json");
-    esp_err_t err = httpd_resp_sendstr(req, json_string);
-    free(json_string);
-    
-    return err;
-}
-
-
-char* create_json(void)
-{
-    cJSON *root = cJSON_CreateObject();
-
-    cJSON_AddStringToObject(root, "id", DEVICE_ID);
-
-    char *json_string = cJSON_PrintUnformatted(root);
-
-    cJSON_Delete(root);
-
-    return json_string; 
-}*/
-
 
 /* ---------------- HTTP server ---------------- */
 
@@ -182,7 +143,7 @@ static esp_err_t state_get_handler(httpd_req_t *req)
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "id", DEVICE_ID);
     cJSON_AddNumberToObject(root, "brightness", brightness);
-    cJSON_AddStringToObject(root, "alarm_state", alarm_state_to_string(state));
+    cJSON_AddStringToObject(root, "alarmState", alarm_state_to_string(state));
  
 
     return send_cjson_response(req, root);
