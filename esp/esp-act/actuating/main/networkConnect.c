@@ -20,7 +20,6 @@
 
 #include "shared.h"
 
-// CUSTOMIZE
 #define WIFI_SSID          CONFIG_WIFI_SSID
 #define WIFI_PASSWORD      CONFIG_WIFI_PASSWORD
 
@@ -96,7 +95,38 @@ void wifi_init_sta(void)
 }
 
 /* ---------------- Helper functions ---------------- */
+static esp_err_t send_cjson_response(httpd_req_t *req, cJSON *root)
+{
+    char *json_string = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root); // Clean up the JSON object now that we have the string
+
+    if (json_string == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for JSON response");
+        return httpd_resp_send_500(req);
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = httpd_resp_sendstr(req, json_string);
+    
+    free(json_string);
+    
+    return err;
+}
+
 static esp_err_t send_json_response(httpd_req_t *req, const char *status, const char *message)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "id", DEVICE_ID);
+    cJSON_AddStringToObject(root, "status", status);
+    
+    if (message != NULL) {
+        cJSON_AddStringToObject(root, "message", message);
+    }
+
+    return send_cjson_response(req, root);
+}
+
+/*static esp_err_t send_json_response(httpd_req_t *req, const char *status, const char *message)
 {
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "id", DEVICE_ID);
@@ -133,7 +163,7 @@ char* create_json(void)
     cJSON_Delete(root);
 
     return json_string; 
-}
+}*/
 
 
 /* ---------------- HTTP server ---------------- */
@@ -143,7 +173,22 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     return send_json_response(req, "ok", "ESP32 Web Server is running");
 }
 
-// BE AWARE: this is still to check
+static esp_err_t state_get_handler(httpd_req_t *req)
+{
+    // Ensure these functions are declared in shared.h
+    int brightness = get_current_brightness();
+    alarm_state_t state = get_current_alarm_state();
+ 
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "id", DEVICE_ID);
+    cJSON_AddNumberToObject(root, "brightness", brightness);
+    cJSON_AddStringToObject(root, "alarm_state", alarm_state_to_string(state));
+ 
+
+    return send_cjson_response(req, root);
+}
+
+
 static esp_err_t ambientLight_post_handler(httpd_req_t *req)
 {
     char buf[128];
@@ -223,6 +268,12 @@ httpd_handle_t start_webserver(void)
             .handler   = root_get_handler,
             .user_ctx  = NULL
         };
+        httpd_uri_t state_uri = {
+            .uri       = "/state",
+            .method    = HTTP_GET,
+            .handler   = state_get_handler,
+            .user_ctx  = NULL
+        };
         httpd_uri_t ambientLight_uri = {
             .uri       = "/ambientlight",
             .method    = HTTP_POST,
@@ -249,6 +300,7 @@ httpd_handle_t start_webserver(void)
         };
 
         httpd_register_uri_handler(server_handle, &root_uri);
+        httpd_register_uri_handler(server_handle, &state_uri);
         httpd_register_uri_handler(server_handle, &ambientLight_uri);
         httpd_register_uri_handler(server_handle, &impact_uri);
         httpd_register_uri_handler(server_handle, &theft_uri);

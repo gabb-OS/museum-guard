@@ -27,14 +27,44 @@ static httpd_handle_t server = NULL;
 #define CMD_BIT_IMPACT (1 << 2)     // Bit 2: 0100
 #define CMD_BIT_TIMEOUT (1 << 3)    // Bit 2: 1000
 
-typedef enum {
-    STATE_IDLE,
-    STATE_IMPACT,
-    STATE_THEFT
-} alarm_state_t;
+SemaphoreHandle_t ambientLightMutex = NULL;
+SemaphoreHandle_t alarmLightStateMutex = NULL;
+static int g_currentBrightness = 0;
+static alarm_state_t g_alarmState = STATE_IDLE;
 
 void taskAlarmLedManager(void *pvParameters);
 void impactTimerCallback(TimerHandle_t xTimer);
+
+ 
+/* ---------------- State accessors thread-safe ---------------- */
+int get_current_brightness(void)
+{
+    int value;
+    xSemaphoreTake(ambientLightMutex, portMAX_DELAY);
+    value = g_currentBrightness;
+    xSemaphoreGive(ambientLightMutex);
+    return value;
+}
+ 
+alarm_state_t get_current_alarm_state(void)
+{
+    alarm_state_t value;
+    xSemaphoreTake(alarmLightStateMutex, portMAX_DELAY);
+    value = g_alarmState;
+    xSemaphoreGive(alarmLightStateMutex);
+    return value;
+}
+ 
+const char* alarm_state_to_string(alarm_state_t state)
+{
+    switch (state) {
+        case STATE_IMPACT: return "IMPACT";
+        case STATE_THEFT:  return "THEFT";
+        case STATE_IDLE:
+        default:           return "IDLE";
+    }
+}
+
 
 /************* Main *************/
 void app_main(void)
@@ -59,6 +89,9 @@ void app_main(void)
     gpio_set_level(LED_THEFT_IMPACT_PIN, 0);
 
     gpio_set_direction(LED_AMBIENT_PIN, GPIO_MODE_OUTPUT);
+
+    ambientLightMutex = xSemaphoreCreateMutex();
+    alarmLightStateMutex = xSemaphoreCreateMutex();
 
     impactTimer = xTimerCreate(
         "ImpactTmr",
@@ -98,7 +131,7 @@ void app_main(void)
     xTaskNotify(ambientLightTaskHandle, 30, eSetValueWithOverwrite);
 }
 
-// Normalizes ESP-REC value between [0,100] in ambientLight_post_handler
+// Normalizes value between [0,100] in ambientLight_post_handler
 void taskAmbientLight(void *pvParameters){
     uint32_t brightness;
 
@@ -109,6 +142,11 @@ void taskAmbientLight(void *pvParameters){
         uint32_t duty = (brightness * 255) / 100;
         ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
         ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+
+         
+        xSemaphoreTake(ambientLightMutex, portMAX_DELAY);
+        g_currentBrightness = brightness;
+        xSemaphoreGive(ambientLightMutex);
     }
 
 }
@@ -161,6 +199,10 @@ void taskAlarmLedManager(void *pvParameters) {
                     gpio_set_level(LED_THEFT_IMPACT_PIN, 0);
                 }
             }
+
+            xSemaphoreTake(alarmLightStateMutex, portMAX_DELAY);
+            g_alarmState = state;
+            xSemaphoreGive(alarmLightStateMutex);
 
         } else {
             if (state == STATE_IMPACT) {

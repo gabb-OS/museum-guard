@@ -12,8 +12,17 @@
 /* ---------------- Misc ---------------- */
 #define BLOCKING_TICKS       pdMS_TO_TICKS(100)
 
+/* ---------------- Alarm state type ---------------- */
+typedef enum {
+    STATE_IDLE,
+    STATE_IMPACT,
+    STATE_THEFT
+} alarm_state_t;
+
+
 /* ---------------- Handle condivisi (definiti in main.c) ---------------- */
 extern SemaphoreHandle_t ambientLightMutex;
+extern SemaphoreHandle_t alarmLightStateMutex;
 extern TaskHandle_t ambientLightTaskHandle;
 extern TaskHandle_t impactTaskHandle;
 extern TaskHandle_t theftTaskHandle;
@@ -27,6 +36,12 @@ void taskAmbientLight(void *pvParameters);
 void taskImpactLight(void *pvParameters);
 void taskTheftLight(void *pvParameters);
 void taskResetLight(void *pvParameters);
+
+/* ---------------- State accessors ---------------- */
+int get_current_brightness(void);
+alarm_state_t get_current_alarm_state(void);
+const char* alarm_state_to_string(alarm_state_t state);
+
 
 
 /* ---------------- Networking (definiti in networkConnect.c) ---------------- */
