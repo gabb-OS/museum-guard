@@ -1,4 +1,4 @@
-const ESP32_IP = "10.78.189.198"; // Ensure this matches your ESP32's IP
+const ESP32_IP = "10.78.189.198";
 const BASE_URL = `http://${ESP32_IP}`;
 
 // Helper
