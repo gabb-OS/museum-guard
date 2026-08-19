@@ -1,1 +1,46 @@
-// TODO
+import { getLightLevel, getAccelReading, subscribeToAlarmEvents } from "../adapters/espSen-adapter.js";
+
+export async function createEspSenTD(WoT) {
+    const espSenThing = await WoT.produce({
+        title: "sensor",
+        description: "Sensor node of MuseumGuard",
+        properties: {
+            ambientLight: { type: "number", description: "Percentuale di luce rilevata (0-100)", observable: true, readOnly: true },
+            accelerometer: {
+                type: "object",
+                description: "Accelerazione sui tre assi (g)",
+                properties: { ax: { type: "number" }, ay: { type: "number" }, az: { type: "number" } },
+                observable: true, readOnly: true
+            }
+        },
+        events: {
+            alarmEvent: { description: "Notifica impact/theft dal sensore", data: { type: "object", properties: { type: { type: "string" } } } }
+        }
+    });
+
+    let ambientLight = 0;
+    setInterval(async () => {
+        try {
+            ambientLight = await getLightLevel();
+            espSenThing.emitPropertyChange("ambientLight");
+        } catch (err) { console.warn("[ESP_SEN] errore poll light:", err.message); }
+    }, 2000);
+    espSenThing.setPropertyReadHandler("ambientLight", async () => ambientLight);
+
+    let accel = { ax: 0, ay: 0, az: 0 };
+    setInterval(async () => {
+        try {
+            accel = await getAccelReading();
+            espSenThing.emitPropertyChange("accelerometer");
+        } catch (err) { console.warn("[ESP_SEN] errore poll accelerometro:", err.message); }
+    }, 2000);
+    espSenThing.setPropertyReadHandler("accelerometer", async () => accel);
+
+    subscribeToAlarmEvents(
+        (evt) => espSenThing.emitEvent("alarmEvent", evt),
+        (err) => console.warn("[ESP_SEN] errore observe /events:", err.message)
+    );
+
+    await espSenThing.expose();
+    return espSenThing;
+}
