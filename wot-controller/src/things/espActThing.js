@@ -1,8 +1,9 @@
 // Export a function that takes the WoT object as an argument
-module.exports.createEspActTD = async function(WoT) {
+import {getActuatorState, setBrightness, startBlink, activateAlarm, resetAlarms} from "../adapters/espAct-adapter.js"
 
+export async function createEspActTD(WoT) {
     const espActThing = await WoT.produce({
-        title: "ESP_ACT",
+        title: "actuator",
         description: "Actuator node of MuseumGuard",
         properties: {
             ambientLightBrightness: {
@@ -12,14 +13,20 @@ module.exports.createEspActTD = async function(WoT) {
                 readOnly: true
             },
             alarmLightState: {
-                type: "boolean",
+                type: "string",
                 description: "Impact/Theft Warning LED state",
                 observable: true,
-                readOnly: true
+                readOnly: true,
+                enum: [
+                    "IDLE",
+                    "IMPACT",
+                    "THEFT"
+                ],
+                default: "IDLE",
             },
         },
         actions: {
-            setBrightness: {
+            regulateBrightness: {
                 description: "Modify artwork illumination level",
                 input: {
                     type: "integer",
@@ -43,47 +50,36 @@ module.exports.createEspActTD = async function(WoT) {
 
 
     // PROPERTIES
+    espActThing.setPropertyReadHandler("ambientLightBrightness", async () => {
+        const state = await getActuatorState();
+        return state.brightness;
+    });
 
-    // TODO: piu intelligentemente queste potrebbero restituire con un valore ritornato direttamente dall'ESP
-    // anziche da una var locale
-    let ambientLightBrightness = 50;
-    let alarmLightState = false;
-    espActThing.setPropertyReadHandler("ambientLightBrightness", async () => currentLightLevel);
-    espActThing.setPropertyReadHandler("alarmLightState", async () => alarmLightState);
+    espActThing.setPropertyReadHandler("alarmLightState", async () => {
+        const state = await getActuatorState();
+        return state.alarmState;
+    });
 
-
-    // ACTIONS
     espActThing.setActionHandler("regulateBrightness", async (params) => {
-        const value = await params.value();
-        const res = await fetch(`${BASE_URL}/ambientlight`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ brightness: value })
-        });
-        if (!res.ok) throw new Error(`ESP-ACT error: ${res.status}`);
-
-        currentLightLevel = value;
-        espActThing.emitPropertyChange("ambientLightBrightness");
+        const brightness = await params.value();
+        await setBrightness(brightness);
+        return;
     });
 
     espActThing.setActionHandler("triggerImpactBlink", async () => {
-        await fetch(`${BASE_URL}/impact`, { method: "POST" });
-        alarmLightState = true;
-        espActThing.emitPropertyChange("alarmLightState");
-        // TODO: timer lato controller per rimettere alarmLightState=false dopo 20s
-        // OPPURE un event in arrivo da esp
-    });
-    espActThing.setActionHandler("triggerTheftAlarm", async () => {
-        await fetch(`${BASE_URL}/theft`, { method: "POST" });
-        alarmLightState = true;
-        espActThing.emitPropertyChange("alarmLightState");
-    });
-    espActThing.setActionHandler("resetAlarm", async () => {
-        await fetch(`${BASE_URL}/reset`, { method: "POST" });
-        alarmLightState = false;
+        await startBlink();
         espActThing.emitPropertyChange("alarmLightState");
     });
 
+    espActThing.setActionHandler("triggerTheftAlarm", async () => {
+        await activateAlarm();
+        espActThing.emitPropertyChange("alarmLightState");
+    });
+
+    espActThing.setActionHandler("resetAlarmLight", async () => {
+        await resetAlarms();
+        espActThing.emitPropertyChange("alarmLightState");
+    });
 
 
     await espActThing.expose();
