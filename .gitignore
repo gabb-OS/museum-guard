@@ -144,3 +144,6 @@ logs/
 
 # JetBrains (PyCharm / CLion)
 .idea/
+
+# Node.js dependencies
+node_modules/
