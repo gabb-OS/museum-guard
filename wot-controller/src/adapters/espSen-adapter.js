@@ -1,4 +1,4 @@
-import { CoapClient } from "../coap-client.js";
+import { CoapClient } from "../coap/coap-client.js";
 
 const DEFAULT_HOST = process.env.ESP_SEN_ADDRESS || "esp-sen-mock";
 const DEFAULT_PORT = parseInt(process.env.COAP_PORT || "5683", 10);
