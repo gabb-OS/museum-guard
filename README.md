@@ -157,30 +157,102 @@ museum-guard/
 
 ---
 
-### Avvio Rapido con Docker (Ambiente di Test)
+### 🐳 Avvio con Docker
 
-È possibile avviare l'intera infrastruttura (InfluxDB, Grafana e i Mockup dei nodi) in ambiente simulato senza hardware fisico:
+Il sistema supporta più modalità di avvio, selezionabili tramite i **profili di Docker Compose** e un file `.env`:
 
-1. **Clona il repository ed avvia i container:**
+- **Modalità Mock (completa)** — l'intera infrastruttura (InfluxDB, Grafana, WoT Controller *e* i mockup Python di ESP-SEN/ESP-ACT) gira in container, senza hardware fisico collegato.
+- **Modalità Mock (parziale)** — mocki solo il nodo che ti manca (es. hai l'ESP-ACT reale collegato ma non l'ESP-SEN, o viceversa).
+- **Modalità Hardware Reale** — WoT Controller, InfluxDB e Grafana girano in Docker, ma puntano agli ESP32 fisici sulla rete locale al posto dei mockup.
+
+#### Configurazione (`.env`)
+
+Copia il template e compilalo secondo lo scenario che ti serve:
+
 ```bash
-git clone [https://github.com/tuo-username/museum-guard.git](https://github.com/tuo-username/museum-guard.git)
-cd museum-guard
-docker-compose up -d
-
+cp .env.example .env.mock    # per lavorare senza hardware (entrambi mockati)
+cp .env.example .env.real    # per lavorare con entrambi gli ESP32 reali
 ```
 
+Nello scenario reale, imposta in `.env.real` gli indirizzi IP dei dispositivi sulla tua LAN:
 
-2. **Verifica i servizi attivi:**
-* **Grafana:** [http://localhost:3000](http://localhost:3000) *(Credenziali: `admin` / `admin`)* — *Dashboard ed InfluxDB già configurati via provisioning.*
-* **InfluxDB:** [http://localhost:8086](http://localhost:8086)
-* **ESP-SEN Mock:** `coap://localhost:5683`
-* **ESP-ACT Mock:** `http://localhost:8081`
+```env
+ESP_SEN_ADDRESS=192.168.x.x
+ESP_ACT_ADDRESS=192.168.x.x
+```
 
+> ⚠️ Il PC che esegue `docker compose` deve trovarsi sulla stessa rete WiFi degli ESP32 — il WoT Controller li raggiunge come client CoAP/HTTP in uscita, non serve nessuna porta esposta lato ESP32.
 
-3. **Arresto dei servizi:**
+I file `.env.mock` / `.env.real` contengono indirizzi di rete specifici della tua installazione: non vengono committati (vedi `.gitignore`), resta versionato solo `.env.example`.
+
+Per gli scenari **misti** (un nodo reale, l'altro mockato), l'unica differenza è che in `ESP_SEN_ADDRESS`/`ESP_ACT_ADDRESS` metti il nome del container mock per il nodo che vuoi simulare e l'IP reale per l'altro:
+
+```env
+# esempio: ESP-SEN reale collegato, ESP-ACT ancora mockato
+ESP_SEN_ADDRESS=192.168.1.42
+ESP_ACT_ADDRESS=esp-act-mock
+```
+
+#### Clona ed avvia
+
 ```bash
-docker-compose down
+git clone https://github.com/tuo-username/museum-guard.git
+cd museum-guard
+```
 
+**Con entrambi i mockup (ambiente di test, senza hardware):**
+```bash
+docker compose --env-file .env.mock --profile mock up -d
+```
+
+**Con un solo nodo mockato** (l'altro reale, indirizzo IP impostato in `.env`):
+```bash
+docker compose --env-file .env.mock --profile mock-sen up -d   # solo ESP-SEN mockato
+docker compose --env-file .env.mock --profile mock-act up -d   # solo ESP-ACT mockato
+```
+
+**Con l'hardware reale collegato (entrambi i nodi):**
+```bash
+docker compose --env-file .env.real up -d
+```
+(qui i container mock *non* partono, anche restando definiti nel `docker-compose.yml`, perché non appartengono al profilo di default)
+
+Se preferisci non scrivere `--env-file` ad ogni comando, puoi copiare il file scelto su `.env` (che Compose carica automaticamente):
+```bash
+cp .env.mock .env   # oppure .env.real, a seconda dello scenario
+docker compose --profile mock up -d          # entrambi mockati
+docker compose --profile mock-sen up -d      # solo sensing mockato
+docker compose up -d                         # hardware reale, nessun profilo
+```
+
+#### Verifica i servizi attivi
+
+* **Grafana:** [http://localhost:3000](http://localhost:3000) — dashboard e datasource InfluxDB già provisionati
+* **InfluxDB:** [http://localhost:8086](http://localhost:8086)
+* **WoT Controller:** [http://localhost:8080](http://localhost:8080) — Thing Description dei nodi esposti
+* **ESP-SEN Mock** *(profili `mock` o `mock-sen`)*: `coap://localhost:5683`
+* **ESP-ACT Mock** *(profili `mock` o `mock-act`)*: [http://localhost:8081](http://localhost:8081)
+
+#### Arresto dei servizi
+
+```bash
+docker compose down
+```
+
+### Esecuzione Standalone dei Mockup (senza Docker)
+
+Utile per sviluppare o debuggare un singolo mockup in isolamento:
+
+```bash
+# Mockup Sensing (ESP-SEN)
+cd esp/esp-sen/mockup
+pip install -r requirements.txt
+python esp_sen_mock.py
+
+# Mockup Attuazione (ESP-ACT)
+cd esp/esp-act/mockup
+pip install -r requirements.txt
+python esp_act_mock.py
 ```
 
 
