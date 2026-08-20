@@ -32,6 +32,33 @@ export function subscribeToAlarmEvents(onEvent, onError) {
     }, onError);
 }
 
+export async function getThresholds() {
+    try {
+        const raw = await client.get("/thresholds");
+        return JSON.parse(raw);
+    } catch (err) {
+        handleDeviceError(err, "fetching detection thresholds");
+    }
+}
+
+export async function setImpactThreshold(value) {
+    try {
+        const res = await client.put("/thresholds/impact", String(value));
+        return res.code; // 2.04 = COAP_RESPONSE_CODE_CHANGED
+    } catch (err) {
+        handleDeviceError(err, "setting impact threshold");
+    }
+}
+
+export async function setTheftThreshold(value) {
+    try {
+        const res = await client.put("/thresholds/theft", String(value));
+        return res.code;
+    } catch (err) {
+        handleDeviceError(err, "setting theft threshold");
+    }
+}
+
 function handleDeviceError(err, actionDescription) {
     throw new Error(`ESP_SEN Error (${actionDescription}): ${err.message}`);
 }

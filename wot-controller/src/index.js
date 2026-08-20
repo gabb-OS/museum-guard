@@ -4,7 +4,7 @@ import httpPkg from "@node-wot/binding-http";
 const { Servient } = corePkg;
 const { HttpServer } = httpPkg;
 
-//import { createEspSenTD } from "./things/espSenThing.js";
+import { createEspSenTD } from "./things/espSenThing.js";
 import { createEspActTD } from "./things/espActThing.js";
 
 async function main() {
@@ -17,7 +17,7 @@ async function main() {
     // Produzione dei due Thing: da qui in poi sono raggiungibili
     // via HTTP a http://node-wot:8080/esp-sen e /esp-act (TD incluso)
     
-    //const espSenThing = await createEspSenTD(WoT);
+    const espSenThing = await createEspSenTD(WoT);
     const espActThing = await createEspActTD(WoT);
 
     //console.log("TD ESP-SEN:", espSenThing.getThingDescription().id);

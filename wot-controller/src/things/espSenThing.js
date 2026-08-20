@@ -1,4 +1,7 @@
-import { getLightLevel, getAccelReading, subscribeToAlarmEvents } from "../adapters/espSen-adapter.js";
+import {
+    getLightLevel, getAccelReading, subscribeToAlarmEvents,
+    getThresholds, setImpactThreshold, setTheftThreshold
+} from "../adapters/espSen-adapter.js";
 
 export async function createEspSenTD(WoT) {
     const espSenThing = await WoT.produce({
@@ -11,11 +14,30 @@ export async function createEspSenTD(WoT) {
                 description: "Accelerazione sui tre assi (g)",
                 properties: { ax: { type: "number" }, ay: { type: "number" }, az: { type: "number" } },
                 observable: true, readOnly: true
+            },
+            thresholds: {
+                type: "object",
+                description: "Soglie correnti di rilevamento urto/furto",
+                properties: {
+                    impact: { type: "number" },
+                    theft_displacement: { type: "number" }
+                },
+                observable: true, readOnly: true
             }
         },
         events: {
             alarmEvent: { description: "Notifica impact/theft dal sensore", data: { type: "object", properties: { type: { type: "string" } } } }
-        }
+        },
+        actions: {
+            setImpactThreshold: {
+                description: "Configura la soglia di rilevamento urto accidentale (asse X)",
+                input: { type: "number" }
+            },
+            setTheftThreshold: {
+                description: "Configura la soglia di spostamento verticale per il furto (asse Z)",
+                input: { type: "number" }
+            }
+        },
     });
 
     let ambientLight = 0;
@@ -35,6 +57,31 @@ export async function createEspSenTD(WoT) {
         } catch (err) { console.warn("[ESP_SEN] errore poll accelerometro:", err.message); }
     }, 2000);
     espSenThing.setPropertyReadHandler("accelerometer", async () => accel);
+
+    let thresholds = { impact: 0, theft_displacement: 0 };
+    setInterval(async () => {
+        try {
+            thresholds = await getThresholds();
+            espSenThing.emitPropertyChange("thresholds");
+        } catch (err) { console.warn("[ESP_SEN] errore poll thresholds:", err.message); }
+    }, 5000);
+    espSenThing.setPropertyReadHandler("thresholds", async () => thresholds);
+
+    espSenThing.setActionHandler("setImpactThreshold", async (params) => {
+        const value = await params.value();
+        await setImpactThreshold(value);
+        thresholds = await getThresholds();
+        espSenThing.emitPropertyChange("thresholds");
+        return undefined;
+    });
+
+    espSenThing.setActionHandler("setTheftThreshold", async (params) => {
+        const value = await params.value();
+        await setTheftThreshold(value);
+        thresholds = await getThresholds();
+        espSenThing.emitPropertyChange("thresholds");
+        return undefined;
+    });
 
     subscribeToAlarmEvents(
         (evt) => espSenThing.emitEvent("alarmEvent", evt),
