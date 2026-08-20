@@ -8,9 +8,9 @@ datasources:
     isDefault: true
     jsonData:
       version: Flux
-      organization: myorg
-      defaultBucket: museum_data
+      organization: ${INFLUXDB_ORG}
+      defaultBucket: ${INFLUXDB_BUCKET}
       tlsSkipVerify: true
     secureJsonData:
-      token: my-super-token
+      token: ${INFLUXDB_TOKEN}
     editable: true
