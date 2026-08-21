@@ -5,9 +5,12 @@ const { WsClientFactory } = require("@node-wot/binding-ws");
 const { FileClientFactory } = require("@node-wot/binding-file");
 
 async function main() {
-    // Create the Servient in Client mode
-    // get the actuator and sensor Thing Descriptions from the WoT Controller
-    const { sensor, actuator } = await initWotConsumer();
+	const servient = new Servient();  
+    servient.addClientFactory(new HttpClientFactory());
+    const wot = await servient.start();
+
+    //Init actuator and sensor Thing from the WoT Controller
+    const { sensor, actuator } = await initWotConsumer(wot);
     
     // Init InfluxDB
 
