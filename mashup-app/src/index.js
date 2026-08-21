@@ -1,8 +1,9 @@
-const { Servient } = require("@node-wot/core");
-const { HttpClientFactory } = require("@node-wot/binding-http");
-const { CoapClientFactory } = require("@node-wot/binding-coap");
-const { WsClientFactory } = require("@node-wot/binding-ws");
-const { FileClientFactory } = require("@node-wot/binding-file");
+import { initWotConsumer } from "./clients/wotConsumer.js";
+import { Servient } from "@node-wot/core";
+import { HttpClientFactory } from "@node-wot/binding-http";
+
+import { startTelemetryPolling } from "./logic/telemetryPoller.js";
+import { registerAlarmHandler } from "./logic/alarmHandler.js";
 
 async function main() {
 	const servient = new Servient();  
@@ -10,11 +11,16 @@ async function main() {
     const wot = await servient.start();
 
     //Init actuator and sensor Thing from the WoT Controller
-    const { sensor, actuator } = await initWotConsumer(wot);
-    
-    // Init InfluxDB
+    const{sensor, actuator} = await initWotConsumer(wot);
 
-    // TODO all inits
+    //TODO: Init InfluxDB
+    //
+
+    // Req-res polling telemetry both sensor and actuator values
+    startTelemetryPolling(sensor, actuator);
+
+    // Pub-Sub Event driven impact-theft alarm handling
+    registerAlarmHandler(sensor, actuator);
     
 }
 
