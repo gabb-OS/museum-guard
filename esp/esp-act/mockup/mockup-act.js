@@ -1,5 +1,6 @@
-const ESP32_IP = "10.78.189.198";
-const BASE_URL = `http://${ESP32_IP}`;
+const ESP_ACT_ADDRESS = process.env.ESP_ACT_ADDRESS || "esp-act-mock";
+const HTTP_PORT = process.env.HTTP_PORT || "80";
+const BASE_URL = `http://${ESP_ACT_ADDRESS}:${HTTP_PORT}`;
 
 // Helper
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -34,7 +35,7 @@ async function sendBrightness(value) {
 
 // Main
 (async () => {
-  console.log("! STARTING ESP32 TEST SEQUENCE \n");
+  console.log(`! STARTING ESP32 TEST SEQUENCE (target: ${BASE_URL}) \n`);
 
   console.log("[1] Testing Ambient Light Fading...");
   for (const level of [0, 25, 50, 75, 100, 0]) {
