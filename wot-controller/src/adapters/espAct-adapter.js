@@ -1,7 +1,8 @@
 import axios from "axios";
 
-//const DEFAULT_BASE = process.env.ESP32_BASE_URL
-const DEFAULT_BASE = "http://10.78.189.198" // TODO: da configurare in modo più flessibile (env, config file, etc.);
+const DEFAULT_HOST = process.env.ESP_ACT_ADDRESS || "esp-act-mock";
+const DEFAULT_PORT = parseInt(process.env.HTTP_PORT || "80", 10);
+const DEFAULT_BASE = `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 
 export async function getActuatorState(base = DEFAULT_BASE) {
     try {
@@ -58,48 +59,3 @@ function handleDeviceError(err, actionDescription) {
         throw new Error(`ESP32 Error (${actionDescription}): ${err.message}`);
     }
 }
-
-
-
-
-
-/**
- * 
-
-
-
-
-
-    // ACTIONS
-    espActThing.setActionHandler("regulateBrightness", async (params) => {
-        const value = await params.value();
-        const res = await fetch(`${BASE_URL}/ambientlight`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ brightness: value })
-        });
-        if (!res.ok) throw new Error(`ESP-ACT error: ${res.status}`);
-
-        currentLightLevel = value;
-        espActThing.emitPropertyChange("ambientLightBrightness");
-    });
-
-    espActThing.setActionHandler("triggerImpactBlink", async () => {
-        await fetch(`${BASE_URL}/impact`, { method: "POST" });
-        alarmLightState = true;
-        espActThing.emitPropertyChange("alarmLightState");
-        // TODO: timer lato controller per rimettere alarmLightState=false dopo 20s
-        // OPPURE un event in arrivo da esp
-    });
-    espActThing.setActionHandler("triggerTheftAlarm", async () => {
-        await fetch(`${BASE_URL}/theft`, { method: "POST" });
-        alarmLightState = true;
-        espActThing.emitPropertyChange("alarmLightState");
-    });
-    espActThing.setActionHandler("resetAlarm", async () => {
-        await fetch(`${BASE_URL}/reset`, { method: "POST" });
-        alarmLightState = false;
-        espActThing.emitPropertyChange("alarmLightState");
-    });
-
- */

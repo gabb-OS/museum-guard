@@ -20,7 +20,7 @@ async function main() {
     const espSenThing = await createEspSenTD(WoT);
     const espActThing = await createEspActTD(WoT);
 
-    //console.log("TD ESP-SEN:", espSenThing.getThingDescription().id);
+    console.log("TD ESP-SEN:", espSenThing.getThingDescription().id);
     console.log("TD ESP-ACT:", espActThing.getThingDescription().id);
 }
 
