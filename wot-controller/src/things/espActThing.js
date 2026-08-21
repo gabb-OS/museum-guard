@@ -6,7 +6,7 @@ export async function createEspActTD(WoT) {
         title: "actuator",
         description: "Actuator node of MuseumGuard",
         properties: {
-            ambientLightBrightness: {
+            artworkLedBrightness: {
                 type: "integer",
                 description: "Artwork illumination LED level",
                 observable: true,
@@ -50,7 +50,7 @@ export async function createEspActTD(WoT) {
 
 
     // PROPERTIES
-    espActThing.setPropertyReadHandler("ambientLightBrightness", async () => {
+    espActThing.setPropertyReadHandler("artworkLedBrightness", async () => {
         const state = await getActuatorState();
         return state.brightness;
     });
