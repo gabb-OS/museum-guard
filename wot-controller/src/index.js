@@ -15,7 +15,7 @@ async function main() {
     console.log("Servient WoT started");
 
     // Produzione dei due Thing: da qui in poi sono raggiungibili
-    // via HTTP a http://node-wot:8080/esp-sen e /esp-act (TD incluso)
+    // via HTTP a http://node-wot:8080/sensor e /actuator
     
     const espSenThing = await createEspSenTD(WoT);
     const espActThing = await createEspActTD(WoT);
