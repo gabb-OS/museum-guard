@@ -17,8 +17,8 @@
 #include "mylib/gps.h"
 
 // Wifi 
-#define WIFI_SSID          "ProgettoIoT"
-#define WIFI_PASSWORD       "PasswordIoT"
+#define WIFI_SSID          CONFIG_WIFI_SSID
+#define WIFI_PASSWORD      CONFIG_WIFI_PASSWORD
 // GPS
 #define GPS_UART_NUM   UART_NUM_1
 #define GPS_TX_PIN     GPIO_NUM_17
