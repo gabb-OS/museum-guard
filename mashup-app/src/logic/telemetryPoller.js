@@ -3,6 +3,14 @@
     – ambient light measurements;
     – acceleration values on X/Y/Z axes;
 
+– actuator states (IDLE IMPACT THEFT);
+– lighting control values (led intensity value);
+
+Il polling unico legge sensore+attuatore, scrive tutto in InfluxDB
+e regola l'illuminazione dell'opera in base alla luce ambientale
+(requisito base della traccia, non il bonus "Predictive Lighting
+Control" — quello sostituira'/estendera' computeTargetBrightness
+con una stima futura, vedi services/predictiveLightService.js).
 */
 
 import { writeTelemetry } from "../services/influxService.js";
