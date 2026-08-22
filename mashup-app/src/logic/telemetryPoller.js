@@ -1,12 +1,8 @@
 /*
-GABE: farei un unico polling loop per leggere
-i valori dei sensori e lo stato degli attuatori, POI da scrivere in influx,
 - periodically read the sensor measurements from ESP-SEN;
     – ambient light measurements;
     – acceleration values on X/Y/Z axes;
 
-– actuator states (IDLE IMPACT THEFT ???);
-– lighting control values (led intensity value ???).
 */
 
 import { writeTelemetry } from "../services/influxService.js";

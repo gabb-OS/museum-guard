@@ -15,7 +15,6 @@ async function main() {
     //Init actuator and sensor Thing from the WoT Controller
     const {sensor, actuator} = await initWotConsumer(wot);
 
-    //TODO: Init InfluxDB
     // InfluxDB si inizializza da solo all'import di influxService.js
     // (client + writeApi creati a module-scope). Qui registriamo solo
     // il flush pulito allo shutdown, per non perdere punti in buffer.
