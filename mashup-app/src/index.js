@@ -1,27 +1,33 @@
 import { initWotConsumer } from "./clients/wotConsumer.js";
 import { Servient } from "@node-wot/core";
-import { HttpClientFactory } from "@node-wot/binding-http";
+import pkg from "@node-wot/binding-http";
+const { HttpClientFactory } = pkg;
 
 import { startTelemetryPolling } from "./logic/telemetryPoller.js";
 import { registerAlarmHandler } from "./logic/alarmHandler.js";
+import { closeInflux } from "./services/influxService.js";
 
 async function main() {
-	const servient = new Servient();  
+	const servient = new Servient();
     servient.addClientFactory(new HttpClientFactory());
     const wot = await servient.start();
 
     //Init actuator and sensor Thing from the WoT Controller
-    const{sensor, actuator} = await initWotConsumer(wot);
+    const {sensor, actuator} = await initWotConsumer(wot);
 
     //TODO: Init InfluxDB
-    //
+    // InfluxDB si inizializza da solo all'import di influxService.js
+    // (client + writeApi creati a module-scope). Qui registriamo solo
+    // il flush pulito allo shutdown, per non perdere punti in buffer.
+    process.on("SIGTERM", async () => { await closeInflux(); process.exit(0); });
+    process.on("SIGINT", async () => { await closeInflux(); process.exit(0); });
 
     // Req-res polling telemetry both sensor and actuator values
     startTelemetryPolling(sensor, actuator);
 
     // Pub-Sub Event driven impact-theft alarm handling
     registerAlarmHandler(sensor, actuator);
-    
+
 }
 
 main().catch(err => {

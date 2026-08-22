@@ -1,6 +1,7 @@
 import { Servient } from "@node-wot/core";
-import { HttpClientFactory } from "@node-wot/binding-http";
-import { config } from "./config.js";
+import pkg from "@node-wot/binding-http";
+const { HttpClientFactory } = pkg;
+import { config } from "../config.js";
 
 export async function initWotConsumer(wot) {
 	// Consume the sensor Thing

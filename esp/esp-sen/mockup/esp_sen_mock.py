@@ -21,6 +21,13 @@ THRESHOLD_MAX = 5.00
 THEFT_CONFIRM_SAMPLES = 6     # persistenza richiesta per confermare (come firmware)
 THEFT_COOLDOWN_S = 3.0
 
+# GPS: come GPS_PING_INTERVAL_MS in main.c (5000ms). Punto base + piccolo
+# random walk per simulare lo spostamento dell'opera una volta rubata.
+GPS_PING_INTERVAL_S = 5.0
+GPS_BASE_LAT = 45.4642    # Milano, giusto per avere coordinate plausibili
+GPS_BASE_LON = 9.1900
+GPS_WALK_STEP = 0.0005    # ~50m per ping, cosi' il tracking si vede muoversi
+
 # -------------------- Stato condiviso --------------------
 light_percent = LIGHT_BASE
 
@@ -34,6 +41,12 @@ avg_ax = avg_ay = avg_az = 0.0      # esposto su /accel, come g_avg_* nel firmwa
 baseline_az = 1.0
 theft_counter = 0
 last_theft_trigger = 0.0
+
+# Stato tracking GPS: mirror di g_tracking_active nel firmware. Diventa
+# True quando un furto viene confermato, si azzera solo con reset_alarm.
+tracking_active = False
+tracking_lock = asyncio.Lock()
+gps_lat, gps_lon = GPS_BASE_LAT, GPS_BASE_LON
 
 light_lock = asyncio.Lock()
 accel_lock = asyncio.Lock()          # protegge ax/ay/az correnti E avg_*
@@ -83,6 +96,7 @@ async def accelerometer_task():
     global ax, ay, az, last_ax, last_ay, last_az
     global sum_ax, sum_ay, sum_az, sample_count
     global baseline_az, theft_counter, last_theft_trigger
+    global tracking_active
 
     while True:
         # Vibrazioni normali attorno al riposo (gravità su Z)
@@ -119,8 +133,7 @@ async def accelerometer_task():
             theft_th = theft_threshold
 
         if abs(diff_x) > impact_th:
-            ev = {"type": "impact", "axis": "x", "value": round(diff_x, 3),
-                  "timestamp": time.time()}
+            ev = {"type": "impact", "axis": "x", "value": round(diff_x, 3)}
             await push_event(ev)
             logger.warning(f"IMPACT DETECTED: diff_x={diff_x:.3f} > {impact_th}")
 
@@ -137,11 +150,12 @@ async def accelerometer_task():
                 if theft_counter >= THEFT_CONFIRM_SAMPLES:
                     now = time.time()
                     if now - last_theft_trigger > THEFT_COOLDOWN_S:
-                        ev = {"type": "theft", "axis": "z", "value": round(displacement, 3),
-                              "timestamp": now}
+                        ev = {"type": "theft", "axis": "z", "value": round(displacement, 3)}
                         await push_event(ev)
                         logger.warning(f"THEFT DETECTED: displacement={displacement:.3f} > {theft_th}")
                         last_theft_trigger = now
+                        async with tracking_lock:
+                            tracking_active = True
                     theft_counter = 0
                 await asyncio.sleep(ACCEL_SAMPLE_RATE)
         else:
@@ -154,11 +168,12 @@ async def accelerometer_task():
             if theft_counter >= THEFT_CONFIRM_SAMPLES:
                 now = time.time()
                 if now - last_theft_trigger > THEFT_COOLDOWN_S:
-                    ev = {"type": "theft", "axis": "z", "value": round(displacement, 3),
-                          "timestamp": now}
+                    ev = {"type": "theft", "axis": "z", "value": round(displacement, 3)}
                     await push_event(ev)
                     logger.warning(f"THEFT DETECTED: displacement={displacement:.3f} > {theft_th}")
                     last_theft_trigger = now
+                    async with tracking_lock:
+                        tracking_active = True
                 theft_counter = 0
 
         await asyncio.sleep(ACCEL_SAMPLE_RATE)
@@ -176,6 +191,27 @@ async def accel_avg_task():
             sum_ax = sum_ay = sum_az = 0.0
             sample_count = 0
         await asyncio.sleep(1.0)
+
+
+# -------------------- GPS tracking (come gps_ping_task in main.c) --------------------
+# Finche' tracking_active e' True (furto confermato, non ancora resettato)
+# pinga una posizione GPS ogni GPS_PING_INTERVAL_S e la pusha come evento
+# "position" sullo stesso canale /events di impact/theft. Un piccolo random
+# walk simula lo spostamento dell'opera rubata invece di un punto fisso.
+async def gps_task():
+    global gps_lat, gps_lon
+    while True:
+        async with tracking_lock:
+            tracking = tracking_active
+        if tracking:
+            gps_lat += random.uniform(-GPS_WALK_STEP, GPS_WALK_STEP)
+            gps_lon += random.uniform(-GPS_WALK_STEP, GPS_WALK_STEP)
+            logger.info(f"Fix GPS: lat={gps_lat:.6f} lon={gps_lon:.6f}")
+            ev = {"type": "position", "lat": round(gps_lat, 6), "lon": round(gps_lon, 6)}
+            await push_event(ev)
+            await asyncio.sleep(GPS_PING_INTERVAL_S)
+        else:
+            await asyncio.sleep(0.5)
 
 
 # -------------------- Server CoAP --------------------
@@ -196,7 +232,9 @@ class AccelResource(resource.Resource):
 
 
 class EventResource(resource.ObservableResource):
-    """Restituisce tutti gli eventi in coda (FIFO) e li rimuove.
+    """Restituisce UN evento per volta dalla coda (FIFO), come il firmware
+    reale che tiene solo l'ultimo evento pronto per il prossimo GET
+    (coap_get_last_event in coap_server.c).
 
     Eredita da ObservableResource (non dal semplice Resource) cosi' da
     supportare l'opzione CoAP Observe: quando un client fa GET con
@@ -205,16 +243,22 @@ class EventResource(resource.ObservableResource):
     ogni volta che arriva un nuovo evento, il che fa ri-eseguire render_get()
     e invia il risultato in push a tutti gli observer registrati, senza
     bisogno di polling lato client.
+
+    Se in coda ci sono piu' eventi accumulati (es. raffica ravvicinata),
+    updated_state() viene comunque richiamata una volta per ogni push_event(),
+    quindi ogni notifica corrisponde a un GET e quindi a un evento estratto:
+    la coda si svuota nel tempo, un item alla volta, esattamente come
+    accadrebbe con hardware reale a raffica di eventi ravvicinati.
     """
     async def render_get(self, request):
-        events = []
+        event = None
         async with event_lock:
-            while not event_queue.empty():
+            if not event_queue.empty():
                 try:
-                    events.append(event_queue.get_nowait())
+                    event = event_queue.get_nowait()
                 except asyncio.QueueEmpty:
-                    break
-        payload = json.dumps(events).encode() if events else b"[]"
+                    event = None
+        payload = json.dumps(event).encode() if event is not None else b"{}"
         return Message(payload=payload, content_format=50)
 
 
@@ -259,14 +303,17 @@ class TheftThresholdResource(resource.Resource):
 
 
 class ResetAlarmResource(resource.Resource):
-    """PUT /reset_alarm: ricalibra la baseline sull'ultima media Z, come nel firmware."""
+    """PUT /reset_alarm: ricalibra la baseline sull'ultima media Z e ferma
+    il tracking GPS, come hnd_put_reset_alarm nel firmware reale."""
     async def render_put(self, request):
-        global baseline_az, theft_counter
+        global baseline_az, theft_counter, tracking_active
         async with accel_lock:
             current_az = avg_az
         theft_counter = 0
         baseline_az = current_az
-        logger.info(f"Reset alarm: baseline_az ricalibrata a {baseline_az:.3f}")
+        async with tracking_lock:
+            tracking_active = False
+        logger.info(f"Reset alarm: baseline_az ricalibrata a {baseline_az:.3f}, tracking disattivato")
         return Message(code=68)  # 2.04 Changed
 
 
@@ -283,6 +330,7 @@ async def main():
     asyncio.create_task(light_task())
     asyncio.create_task(accelerometer_task())
     asyncio.create_task(accel_avg_task())
+    asyncio.create_task(gps_task())
 
     # Server CoAP
     root = resource.Site()

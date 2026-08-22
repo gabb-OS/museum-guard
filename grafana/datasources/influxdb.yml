@@ -1,11 +1,23 @@
+# grafana/datasources/datasource.yaml
+#
+# Provisioning automatico del datasource InfluxDB. Grafana legge tutti i
+# file .yaml/.yml sotto /etc/grafana/provisioning/datasources/ al boot
+# (nessun bisogno di configurarlo a mano dalla UI).
+#
+# ${INFLUXDB_ORG}, ${INFLUXDB_BUCKET}, ${INFLUXDB_TOKEN} vengono
+# sostituiti da Grafana con le env passate al container (gia' presenti
+# nel service "grafana" del docker-compose.yml).
+
 apiVersion: 1
 
 datasources:
-  - name: InfluxDB-Museum
+  - name: InfluxDB
     type: influxdb
+    uid: influxdb_museumguard   # uid fisso, usato nei pannelli della dashboard
     access: proxy
-    url: http://influxdb:8086
+    url: http://influxdb:8086   # hostname interno Docker, non e' un segreto
     isDefault: true
+    editable: false             # forza a modificare qui invece che dalla UI (poi si perde al riavvio)
     jsonData:
       version: Flux
       organization: ${INFLUXDB_ORG}
@@ -13,4 +25,3 @@ datasources:
       tlsSkipVerify: true
     secureJsonData:
       token: ${INFLUXDB_TOKEN}
-    editable: true

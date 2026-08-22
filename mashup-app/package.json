@@ -1,0 +1,15 @@
+{
+  "name": "museumguard-mashup-app",
+  "version": "1.0.0",
+  "description": "Mash-up application: consuma i Thing esposti da node-wot, scrive telemetria/eventi su InfluxDB e gestisce la logica di allarme.",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@node-wot/core": "^0.8.0",
+    "@node-wot/binding-http": "^0.8.0",
+    "@influxdata/influxdb-client": "^1.35.0"
+  }
+}

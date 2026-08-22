@@ -59,6 +59,17 @@ export async function setTheftThreshold(value) {
     }
 }
 
+// PUT /reset_alarm: ricalibra la baseline e ferma il tracking GPS
+// (gia' esposto sia dal firmware reale che dal mock Python).
+export async function resetTracking() {
+    try {
+        const res = await client.put("/reset_alarm");
+        return res.code; // 2.04 = COAP_RESPONSE_CODE_CHANGED
+    } catch (err) {
+        handleDeviceError(err, "resetting tracking/GPS");
+    }
+}
+
 function handleDeviceError(err, actionDescription) {
     throw new Error(`ESP_SEN Error (${actionDescription}): ${err.message}`);
 }

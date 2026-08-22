@@ -1,0 +1,218 @@
+{
+  "title": "MuseumGuard",
+  "uid": "museumguard-main",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "timezone": "browser",
+  "tags": ["museumguard"],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Ambient light (%)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "influxdb", "uid": "influxdb_museumguard" },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ambient_light\")\n  |> filter(fn: (r) => r._field == \"value\")"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Acceleration X/Y/Z (g)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "influxdb", "uid": "influxdb_museumguard" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"acceleration\")\n  |> filter(fn: (r) => r._field == \"ax\" or r._field == \"ay\" or r._field == \"az\")"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Impact events",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "datasource": { "type": "influxdb", "uid": "influxdb_museumguard" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"impact_event\")\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> sort(columns: [\"_time\"], desc: true)"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Theft events",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "datasource": { "type": "influxdb", "uid": "influxdb_museumguard" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"theft_event\")\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> sort(columns: [\"_time\"], desc: true)"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Alarm state (attuatore)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "datasource": { "type": "influxdb", "uid": "influxdb_museumguard" },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": ["lastNotNull"],
+          "fields": "/^alarm_state$/"
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": {
+              "IDLE":   { "color": "green",  "text": "IDLE" },
+              "IMPACT": { "color": "orange", "text": "IMPACT" },
+              "THEFT":  { "color": "red",    "text": "THEFT" }
+            }}
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"actuator_state\")\n  |> filter(fn: (r) => r._field == \"alarm_state\")\n  |> last()"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Artwork lighting intensity (%)",
+      "type": "gauge",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "influxdb", "uid": "influxdb_museumguard" },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"actuator_state\")\n  |> filter(fn: (r) => r._field == \"brightness\")\n  |> last()"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Lighting intensity over time (%)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "influxdb", "uid": "influxdb_museumguard" },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"actuator_state\")\n  |> filter(fn: (r) => r._field == \"brightness\")"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Opera rubata?",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 24 },
+      "datasource": { "type": "influxdb", "uid": "influxdb_museumguard" },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": ["lastNotNull"],
+          "fields": "/^alarm_state$/"
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": {
+              "THEFT": { "color": "red",   "text": "SI - RUBATA" },
+              "IDLE":  { "color": "green", "text": "NO" },
+              "IMPACT":{ "color": "green", "text": "NO" }
+            }}
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"actuator_state\")\n  |> filter(fn: (r) => r._field == \"alarm_state\")\n  |> last()"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Ultima posizione GPS nota",
+      "type": "table",
+      "gridPos": { "h": 6, "w": 16, "x": 8, "y": 24 },
+      "datasource": { "type": "influxdb", "uid": "influxdb_museumguard" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"position\")\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 1)"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Ultima posizione GPS (mappa)",
+      "type": "geomap",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 32 },
+      "datasource": { "type": "influxdb", "uid": "influxdb_museumguard" },
+      "options": {
+        "view": { "id": "fit", "lat": 0, "lon": 0, "zoom": 15, "padding": 32 },
+        "layers": [
+          {
+            "type": "markers",
+            "name": "Ultima posizione",
+            "location": { "mode": "coords", "latitudeField": "lat", "longitudeField": "lon" },
+            "config": {
+              "style": {
+                "color": { "fixed": "red" },
+                "size": { "fixed": 8 },
+                "opacity": 0.9
+              }
+            },
+            "tooltip": true
+          }
+        ],
+        "controls": { "showZoom": true, "showAttribution": true, "showScale": false, "mouseWheelZoom": true }
+      },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"position\")\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 1)"
+        }
+      ]
+    }
+  ]
+}

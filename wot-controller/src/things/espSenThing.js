@@ -1,6 +1,6 @@
 import {
     getLightLevel, getAccelReading, subscribeToAlarmEvents,
-    getThresholds, setImpactThreshold, setTheftThreshold
+    getThresholds, setImpactThreshold, setTheftThreshold, resetTracking
 } from "../adapters/espSen-adapter.js";
 
 export async function createEspSenTD(WoT) {
@@ -26,7 +26,19 @@ export async function createEspSenTD(WoT) {
             }
         },
         events: {
-            alarmEvent: { description: "Notifica impact/theft dal sensore", data: { type: "object", properties: { type: { type: "string" } } } }
+            alarmEvent: {
+                description: "Notifica impact/theft/position dal sensore",
+                data: {
+                    type: "object",
+                    properties: {
+                        type: { type: "string", enum: ["impact", "theft", "position"] },
+                        axis: { type: "string" },
+                        value: { type: "number" },
+                        lat: { type: "number" },
+                        lon: { type: "number" }
+                    }
+                }
+            }
         },
         actions: {
             setImpactThreshold: {
@@ -36,6 +48,9 @@ export async function createEspSenTD(WoT) {
             setTheftThreshold: {
                 description: "Configura la soglia di spostamento verticale per il furto (asse Z)",
                 input: { type: "number" }
+            },
+            resetTracking: {
+                description: "Ricalibra la baseline e ferma il tracking GPS dopo un furto (PUT /reset_alarm)"
             }
         },
     });
@@ -83,8 +98,19 @@ export async function createEspSenTD(WoT) {
         return undefined;
     });
 
+    espSenThing.setActionHandler("resetTracking", async () => {
+        await resetTracking();
+        return undefined;
+    });
+
     subscribeToAlarmEvents(
-        (evt) => espSenThing.emitEvent("alarmEvent", evt),
+        (evt) => {
+            // Il mock puo' accumulare piu' eventi tra una notifica CoAP e
+            // l'altra e inviarli come array: lo schema TD di alarmEvent si
+            // aspetta pero' un oggetto singolo, quindi li emettiamo uno a uno.
+            const events = Array.isArray(evt) ? evt : [evt];
+            events.forEach((e) => espSenThing.emitEvent("alarmEvent", e));
+        },
         (err) => console.warn("[ESP_SEN] errore observe /events:", err.message)
     );
 

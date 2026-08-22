@@ -36,6 +36,23 @@ services:
       - influxdb
     restart: unless-stopped
 
+  mashup-app:
+    build: ./mashup-app
+    container_name: museumguard-mashup
+    volumes:
+      - ./mashup-app/src:/app/src
+    environment:
+      - WOT_CONTROLLER_URL=http://node-wot:8080
+      - TELEMETRY_POLL_MS=${TELEMETRY_POLL_MS:-5000}
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      - INFLUXDB_ORG=${INFLUXDB_ORG}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
+    depends_on:
+      - node-wot
+      - influxdb
+    restart: unless-stopped
+    
   node-wot:
     build: ./wot-controller
     container_name: museumguard-wot
