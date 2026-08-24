@@ -46,7 +46,7 @@ export function startTelemetryPolling(sensor, actuator) {
             }
 
         } catch (err) {
-            console.warn("[TELEMETRY] errore poll:", err.message);
+            console.warn("[TELEMETRY] polling error:", err.message);
         }
     }, config.telemetryPollMs);
 }
