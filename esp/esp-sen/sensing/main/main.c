@@ -52,18 +52,19 @@ static float g_avg_ax = 0, g_avg_ay = 0, g_avg_az = 0;
 
 // non piu define: servono configurabili a runtime (bonus soglie)
 static float g_impact_threshold = 0.4f;
-static float g_theft_displacement_threshold = 0.35f;
+static float g_theft_displacement_threshold = 0.25f;
 static SemaphoreHandle_t g_threshold_mutex;
 #define THRESHOLD_MIN 0.05f
 #define THRESHOLD_MAX 5.00f
 
 //THEFT
 #define THEFT_CONFIRM_SAMPLES        6     // persistenza richiesta per confermare
-static float baseline_az = 0;   // asse verticale, sensore montato dritto
+static float baseline_ax = 0;   // asse verticale reale (gravita' letta su X, sensore montato di taglio)
 static bool  baseline_set = false;
 static int   theft_counter = 0;
 #define THEFT_COOLDOWN_MS 3000
 static int64_t last_theft_trigger_us = 0;
+
 void read_light_sensor(void *pvParameters) {
     while (1) {
         int raw = adc1_get_raw(LIGHT_SENS);
@@ -85,9 +86,9 @@ void read_light_sensor(void *pvParameters) {
     }
 }
 
-void calibrate_theft_baseline(float az) {
+void calibrate_theft_baseline(float ax) {
     xSemaphoreTake(g_theft_mutex, portMAX_DELAY);
-    baseline_az = az;
+    baseline_ax = ax;
     baseline_set = true;
     xSemaphoreGive(g_theft_mutex);
 }
@@ -95,44 +96,52 @@ void calibrate_theft_baseline(float az) {
 void read_accelerometer_sensor(void *pvParameters) {
     float ax = 0, ay = 0, az = 0;
     float last_ax = 0, last_ay = 0, last_az = 0;
-    float diff_x, diff_y;
+    float diff_x, diff_y, diff_z;
     read_accel(&last_ax, &last_ay, &last_az);  // prima lettura per inizializzare i "last"
-    calibrate_theft_baseline(last_az); 
+    calibrate_theft_baseline(last_ax); 
     while (1) {
         if (read_accel(&ax, &ay, &az)) {
             diff_x = ax - last_ax; //backword differencies for first derivative
             diff_y = ay - last_ay; //backword differencies for first derivative
-            printf("ax=%.3f ay=%.3f az=%.3f | diff_x=%.3f diff_y=%.3f\n",
-                   ax, ay, az, diff_x, diff_y);
-            // impact resta sull'asse longitudinale (x)
+            diff_z = az - last_az; //backword differencies for first derivative
+            printf("ax=%.3f ay=%.3f az=%.3f | diff_x=%.3f diff_y=%.3f diff_z=%.3f\n",
+                   ax, ay, az, diff_x, diff_y, diff_z);
+            // impact sull'asse trasversale/longitudinale reale (z), non su x che e' l'asse gravita'
             xSemaphoreTake(g_threshold_mutex, portMAX_DELAY);
             float impact_th = g_impact_threshold;
             xSemaphoreGive(g_threshold_mutex);
-            if (fabs(diff_x) > impact_th) {
+            if (fabs(diff_z) > impact_th) {
                 char event_buf[64];
                 int elen = snprintf(event_buf, sizeof(event_buf),
-                                    "{\"type\":\"impact\",\"axis\":\"x\",\"value\":%.3f}", diff_x);
+                                    "{\"type\":\"impact\",\"axis\":\"z\",\"value\":%.3f}", diff_z);
                 coap_push_event(event_buf, elen);
             }
             xSemaphoreTake(g_threshold_mutex, portMAX_DELAY);
             float theft_th = g_theft_displacement_threshold;
             xSemaphoreGive(g_threshold_mutex);
+            
             xSemaphoreTake(g_theft_mutex, portMAX_DELAY);
             if (baseline_set) {
-                float displacement = az - baseline_az;   // theft sull'asse verticale, non piu x
+                float displacement = ax - baseline_ax;   // theft sull'asse verticale reale (x)
+                
+                // --- LOGICA CON ISTERESI ---
                 if (fabs(displacement) > theft_th) {
                     theft_counter += 2;
                     if (theft_counter > 50) theft_counter = 50;
-                } else {
+                } else if (fabs(displacement) < (theft_th * 0.4f)) {
+                    // Il counter scende SOLO se il dispositivo torna chiaramente a riposo (sotto il 40% della soglia).
+                    // I micro-tremori nella "zona grigia" non riescono più ad azzerare i punti accumulati!
                     theft_counter -= 1;
                     if (theft_counter < 0) theft_counter = 0;
                 }
+                // Se fabs(displacement) è tra (theft_th * 0.4f) e theft_th, il counter RESTA CONGELATO.
+                
                 if (theft_counter >= THEFT_CONFIRM_SAMPLES) {
                     int64_t now_us = esp_timer_get_time();
                     if (now_us - last_theft_trigger_us > (int64_t)THEFT_COOLDOWN_MS * 1000) {
                         char event_buf[64];
                         int elen = snprintf(event_buf, sizeof(event_buf),
-                                            "{\"type\":\"theft\",\"axis\":\"z\",\"value\":%.3f}", displacement);
+                                            "{\"type\":\"theft\",\"axis\":\"x\",\"value\":%.3f}", displacement);
                         coap_push_event(event_buf, elen);
                         // fa partire solo il gps, non e' piu uno stato di allarme condiviso
                         xSemaphoreTake(g_tracking_mutex, portMAX_DELAY);
@@ -144,9 +153,11 @@ void read_accelerometer_sensor(void *pvParameters) {
                 }
             }
             xSemaphoreGive(g_theft_mutex);
+            
             last_ax = ax;
             last_ay = ay;
             last_az = az;
+            
             xSemaphoreTake(g_accel_mutex, portMAX_DELAY);
             sum_ax += ax;
             sum_ay += ay;
@@ -166,37 +177,44 @@ void accel_avg_task(void *pvParameters) {
             g_avg_ay = sum_ay / sample_count;
             g_avg_az = sum_az / sample_count;
         }
-        printf("Media 1s: ax=%.3f ay=%.3f az=%.3f (n=%d)\n",g_avg_ax, g_avg_ay, g_avg_az, sample_count);
+        printf("Media 250ms: ax=%.3f ay=%.3f az=%.3f (n=%d)\n",g_avg_ax, g_avg_ay, g_avg_az, sample_count);
         sum_ax = sum_ay = sum_az = 0;
         sample_count = 0;
         xSemaphoreGive(g_accel_mutex);
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        
+        // Ridotto da 1000ms a 250ms: la media ora copre ~25 campioni invece di 100.
+        // Molto più reattiva, specialmente quando fai il reset per ricalibrare la baseline!
+        vTaskDelay(pdMS_TO_TICKS(250)); 
     }
 }
 
 // Task: dopo un furto confermato pinga il gps, finche' non arriva un reset
 // (non e' piu legata a un "allarme" generico, solo al tracking post-furto)
+#define GPS_WARMUP_INTERVAL_MS 2000  // polling "a riposo" per tenere il modulo caldo (evita cold start al bisogno)
+
 void gps_ping_task(void *pvParameters) {
     while (1) {
         bool tracking;
         xSemaphoreTake(g_tracking_mutex, portMAX_DELAY);
         tracking = g_tracking_active;
         xSemaphoreGive(g_tracking_mutex);
-        if (tracking) {
-            float lat, lon;
-            if (read_gps(&lat, &lon)) {
-                ESP_LOGI("GPS_TASK", "Fix GPS: lat=%.6f lon=%.6f", lat, lon);
+
+        // il GPS viene interrogato SEMPRE, non solo quando serve, cosi' arriva
+        // gia' "caldo" (fix acquisito) nel momento in cui scatta un furto
+        float lat, lon;
+        if (read_gps(&lat, &lon)) {
+            ESP_LOGI("GPS_TASK", "Fix GPS: lat=%.6f lon=%.6f", lat, lon);
+            if (tracking) {
                 char event_buf[64];
                 int elen = snprintf(event_buf, sizeof(event_buf),
                                     "{\"type\":\"position\",\"lat\":%.6f,\"lon\":%.6f}", lat, lon);
                 coap_push_event(event_buf, elen);
-            } else {
-                ESP_LOGW("GPS_TASK", "Nessun fix GPS disponibile");
             }
-            vTaskDelay(pdMS_TO_TICKS(GPS_PING_INTERVAL_MS));
         } else {
-            vTaskDelay(pdMS_TO_TICKS(500));
+            ESP_LOGW("GPS_TASK", "Nessun fix GPS disponibile");
         }
+
+        vTaskDelay(pdMS_TO_TICKS(tracking ? GPS_PING_INTERVAL_MS : GPS_WARMUP_INTERVAL_MS));
     }
 }
 
@@ -224,6 +242,7 @@ static void hnd_get_accel(coap_resource_t *resource, coap_session_t *session, co
     coap_pdu_set_code(response, COAP_RESPONSE_CODE_CONTENT);
     coap_add_data(response, len, (const uint8_t *)buf);
 }
+
 static void hnd_get_events(coap_resource_t *resource, coap_session_t *session, const coap_pdu_t *request, const coap_string_t *query, coap_pdu_t *response) {
     uint8_t buf[64];
     size_t len = coap_get_last_event(buf, sizeof(buf));
@@ -299,13 +318,17 @@ static void hnd_put_reset_alarm(coap_resource_t *resource, coap_session_t *sessi
     xSemaphoreTake(g_tracking_mutex, portMAX_DELAY);
     g_tracking_active = false;
     xSemaphoreGive(g_tracking_mutex);
+    
     xSemaphoreTake(g_theft_mutex, portMAX_DELAY);
     theft_counter = 0;
     xSemaphoreGive(g_theft_mutex);
+    
+    // Prendo la media attuale (ora aggiornata ogni 250ms, quindi molto più fedele alla posizione reale istantanea)
     xSemaphoreTake(g_accel_mutex, portMAX_DELAY);
-    float current_az = g_avg_az;
+    float current_ax = g_avg_ax;
     xSemaphoreGive(g_accel_mutex);
-    calibrate_theft_baseline(current_az);
+    
+    calibrate_theft_baseline(current_ax);
     coap_pdu_set_code(response, COAP_RESPONSE_CODE_CHANGED); // 2.04
 }
 
@@ -317,14 +340,18 @@ void app_main(void){
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+    
     wifi_init_sta(WIFI_SSID, WIFI_PASSWORD);// blocca finché non sei connesso
-     if (!init_gps(GPS_UART_NUM, GPS_TX_PIN, GPS_RX_PIN, GPS_BAUD_RATE)) {
+    
+    if (!init_gps(GPS_UART_NUM, GPS_TX_PIN, GPS_RX_PIN, GPS_BAUD_RATE)) {
         ESP_LOGE("MAIN", "GPS init failed");
     }
+    
     // Inizializzazione photoresistor
     adc1_config_width(ADC_WIDTH_BIT_12);
     adc1_config_channel_atten(LIGHT_SENS, ADC_ATTEN_DB_11);
     g_light_mutex = xSemaphoreCreateMutex();
+    
     // Inizializzazione accelerometer
     if (!init_accelerometer(SDA_ACC_SENS, SCL_ACC_SENS)) {
         ESP_LOGE("MAIN", "Accelerometer init failed");
@@ -333,6 +360,7 @@ void app_main(void){
     g_theft_mutex = xSemaphoreCreateMutex();
     g_tracking_mutex = xSemaphoreCreateMutex();
     g_threshold_mutex = xSemaphoreCreateMutex();
+    
     //Inizializzazione server coap
     if (!coap_server_setup()) {
         ESP_LOGE("MAIN", "CoAP setup failed");
