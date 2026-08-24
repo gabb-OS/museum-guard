@@ -44,10 +44,25 @@
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
       "datasource": { "type": "influxdb", "uid": "influxdb_museumguard" },
       "fieldConfig": { "defaults": {}, "overrides": [] },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "renameByName": {
+              "_time": "Time",
+              "x": "X Axis",
+              "y": "Y Axis",
+              "z": "Z Axis"
+            },
+            "indexByName": {}
+          }
+        }
+      ],
       "targets": [
         {
           "refId": "A",
-          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"impact_event\")\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> sort(columns: [\"_time\"], desc: true)"
+          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"impact_event\")\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"system\"])\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"axis\"], valueColumn: \"value\")\n  |> sort(columns: [\"_time\"], desc: true)"
         }
       ]
     },
@@ -58,16 +73,31 @@
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
       "datasource": { "type": "influxdb", "uid": "influxdb_museumguard" },
       "fieldConfig": { "defaults": {}, "overrides": [] },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "renameByName": {
+              "_time": "Time",
+              "x": "X Axis",
+              "y": "Y Axis",
+              "z": "Z Axis"
+            },
+            "indexByName": {}
+          }
+        }
+      ],
       "targets": [
         {
           "refId": "A",
-          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"theft_event\")\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> sort(columns: [\"_time\"], desc: true)"
+          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"theft_event\")\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"system\"])\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"axis\"], valueColumn: \"value\")\n  |> sort(columns: [\"_time\"], desc: true)"
         }
       ]
     },
     {
       "id": 5,
-      "title": "Alarm state (attuatore)",
+      "title": "Alarm state (actuator)",
       "type": "stat",
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
       "datasource": { "type": "influxdb", "uid": "influxdb_museumguard" },
@@ -98,7 +128,7 @@
       "targets": [
         {
           "refId": "A",
-          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"actuator_state\")\n  |> filter(fn: (r) => r._field == \"alarm_state\")\n  |> last()"
+          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"actuator_state\")\n  |> filter(fn: (r) => r._field == \"alarm_state\")\n  |> last()\n  |> drop(columns: [\"_start\", \"_stop\", \"system\"])"
         }
       ]
     },
@@ -132,73 +162,51 @@
     },
     {
       "id": 8,
-      "title": "Opera rubata?",
-      "type": "stat",
-      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 24 },
+      "title": "Latest known GPS positions",
+      "type": "table",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 24 },
       "datasource": { "type": "influxdb", "uid": "influxdb_museumguard" },
-      "options": {
-        "reduceOptions": {
-          "values": false,
-          "calcs": ["lastNotNull"],
-          "fields": "/^alarm_state$/"
-        },
-        "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [
-            { "type": "value", "options": {
-              "THEFT": { "color": "red",   "text": "SI - RUBATA" },
-              "IDLE":  { "color": "green", "text": "NO" },
-              "IMPACT":{ "color": "green", "text": "NO" }
-            }}
-          ]
-        },
-        "overrides": []
-      },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "renameByName": {
+              "_time": "Time",
+              "lat": "Latitude",
+              "lon": "Longitude"
+            },
+            "indexByName": {}
+          }
+        }
+      ],
       "targets": [
         {
           "refId": "A",
-          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"actuator_state\")\n  |> filter(fn: (r) => r._field == \"alarm_state\")\n  |> last()"
+          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"position\")\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"system\"])\n  |> sort(columns: [\"_time\"], desc: false)\n"
         }
       ]
     },
     {
       "id": 9,
-      "title": "Ultima posizione GPS nota",
-      "type": "table",
-      "gridPos": { "h": 6, "w": 16, "x": 8, "y": 24 },
-      "datasource": { "type": "influxdb", "uid": "influxdb_museumguard" },
-      "fieldConfig": { "defaults": {}, "overrides": [] },
-      "targets": [
-        {
-          "refId": "A",
-          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"position\")\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 1)"
-        }
-      ]
-    },
-    {
-      "id": 10,
-      "title": "Ultima posizione GPS (mappa)",
+      "title": "Last GPS position (map)",
       "type": "geomap",
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 32 },
       "datasource": { "type": "influxdb", "uid": "influxdb_museumguard" },
       "options": {
-        "view": { "id": "fit", "lat": 0, "lon": 0, "zoom": 15, "padding": 32 },
+        "view": { "id": "coords", "lat": 44.64783, "lon": 10.92539, "zoom": 7, "padding": 0 },
         "layers": [
           {
             "type": "markers",
-            "name": "Ultima posizione",
-            "location": { "mode": "coords", "latitudeField": "lat", "longitudeField": "lon" },
+            "name": "Last GPS position",
+            "location": { "mode": "auto"},
             "config": {
               "style": {
-                "color": { "fixed": "red" },
-                "size": { "fixed": 8 },
-                "opacity": 0.9
+                "symbol": { "mode": "fixed", "fixed": "img/icons/marker/star.svg" },
+                "color": { "fixed": "orange" },
+                "size": { "fixed": 12 },
+                "opacity": 1
               }
             },
             "tooltip": true
@@ -210,7 +218,7 @@
       "targets": [
         {
           "refId": "A",
-          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"position\")\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 1)"
+          "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"position\")\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> drop(columns: [\"_start\", \"_stop\", \"system\"])\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 1)"
         }
       ]
     }
