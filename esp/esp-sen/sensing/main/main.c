@@ -35,8 +35,8 @@ static SemaphoreHandle_t g_tracking_mutex;
 static SemaphoreHandle_t g_theft_mutex;
 //photoresistor stuff
 #define LIGHT_SENS ADC1_CHANNEL_6
-#define LIGHT_RAW_MIN             1000
-#define LIGHT_RAW_MAX             4095
+#define LIGHT_RAW_MIN             350
+#define LIGHT_RAW_MAX             3800
 static float g_light_percent = 0.0f;
 SemaphoreHandle_t g_light_mutex;
 
