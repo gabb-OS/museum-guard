@@ -4,4 +4,9 @@ export const config = {
     actuatorThingPath: "/actuator",
 
     telemetryPollMs: parseInt(process.env.TELEMETRY_POLL_MS || "5000", 10),
+
+    telegram: {
+        botToken: process.env.TELEGRAM_BOT_TOKEN,
+        chatId: process.env.TELEGRAM_BOT_CHAT_ID,
+    },
 };
