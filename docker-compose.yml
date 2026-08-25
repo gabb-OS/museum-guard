@@ -56,21 +56,21 @@ services:
       - predictive-light
     restart: unless-stopped
 
- # predictive-light:
- #   build: ./predictive-light
- #   container_name: museumguard-predictive-light
- #   environment:
- #     - INFLUXDB_URL=http://influxdb:8086
- #     - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
- #     - INFLUXDB_ORG=${INFLUXDB_ORG}
- #     - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
- #     - PREDICT_INTERVAL_S=${PREDICT_INTERVAL_S:-5}
- #     - PREDICTION_HORIZON_S=${PREDICTION_HORIZON_S:-30}
- #     - HISTORY_WINDOW_S=${HISTORY_WINDOW_S:-600}
- #     - EMA_ALPHA=${EMA_ALPHA:-0.3}
- #   depends_on:
- #     - influxdb
- #   restart: unless-stopped
+  predictive-light:
+    build: ./predictive-light
+    container_name: museumguard-predictive-light
+    environment:
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      - INFLUXDB_ORG=${INFLUXDB_ORG}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
+      - PREDICT_INTERVAL_S=${PREDICT_INTERVAL_S:-5}
+      - PREDICTION_HORIZON_S=${PREDICTION_HORIZON_S:-30}
+      - HISTORY_WINDOW_S=${HISTORY_WINDOW_S:-600}
+      - EMA_ALPHA=${EMA_ALPHA:-0.3}
+    depends_on:
+      - influxdb
+    restart: unless-stopped
 
   node-wot:
     build: ./wot-controller
