@@ -25,7 +25,7 @@ Non esiste nessun percorso in cui entrambi possano chiamare
 regulateBrightness nello stesso ciclo.
 */
 
-import { writeTelemetry } from "../services/influxService.js";
+import { writeTelemetry, writeThresholds } from "../services/influxService.js";
 import { getPredictedBrightness } from "../services/predictiveLightService.js";
 import { config } from "../config.js";
 
@@ -50,8 +50,11 @@ export function startTelemetryPolling(sensor, actuator) {
             const alarmState = await (await actuator.readProperty("alarmLightState")).value();
             const artworkBrightness = await (await actuator.readProperty("artworkLedBrightness")).value();
 
-            await writeTelemetry({ lightSens, accelSens, alarmState, artworkBrightness });
+            const thresholds = await (await sensor.readProperty("thresholds")).value();
 
+            await writeTelemetry({ lightSens, accelSens, alarmState, artworkBrightness });
+            await writeThresholds(thresholds);
+            
             // Regolazione dell'illuminazione: predittivo primo, fallback
             // reattivo SOLO in caso di errore. Un solo invokeAction per ciclo.
             let target;

@@ -25,22 +25,23 @@
 #define GPS_RX_PIN     GPIO_NUM_16
 #define GPS_BAUD_RATE  9600
 #define GPS_PING_INTERVAL_MS 5000
+#define GPS_WARMUP_INTERVAL_MS 2000  
 
 // stato di allarme globale
 static bool g_tracking_active = false;
 static SemaphoreHandle_t g_tracking_mutex;
 
-// mutex dedicato allo stato del rilevamento furto (baseline + counter),
-// acceduto anche dall'handler di reset CoAP, non solo dalla task accelerometro
+// mutex dedicato allo stato del rilevamento furto (baseline + counter)
 static SemaphoreHandle_t g_theft_mutex;
-//photoresistor stuff
+
+// photoresistor stuff
 #define LIGHT_SENS ADC1_CHANNEL_6
 #define LIGHT_RAW_MIN             350
 #define LIGHT_RAW_MAX             3800
 static float g_light_percent = 0.0f;
 SemaphoreHandle_t g_light_mutex;
 
-//accelerometer stuff
+// accelerometer stuff
 #define SDA_ACC_SENS GPIO_NUM_21
 #define SCL_ACC_SENS GPIO_NUM_22
 #define I2C_MASTER_NUM      I2C_NUM_0
@@ -50,16 +51,16 @@ static int sample_count = 0;
 static SemaphoreHandle_t g_accel_mutex;
 static float g_avg_ax = 0, g_avg_ay = 0, g_avg_az = 0; 
 
-// non piu define: servono configurabili a runtime (bonus soglie)
+// soglie configurabili a runtime
 static float g_impact_threshold = 0.4f;
 static float g_theft_displacement_threshold = 0.25f;
 static SemaphoreHandle_t g_threshold_mutex;
 #define THRESHOLD_MIN 0.05f
 #define THRESHOLD_MAX 5.00f
 
-//THEFT
-#define THEFT_CONFIRM_SAMPLES        6     // persistenza richiesta per confermare
-static float baseline_ax = 0;   // asse verticale reale (gravita' letta su X, sensore montato di taglio)
+// THEFT
+#define THEFT_CONFIRM_SAMPLES        6
+static float baseline_ax = 0;
 static bool  baseline_set = false;
 static int   theft_counter = 0;
 #define THEFT_COOLDOWN_MS 3000
@@ -68,7 +69,7 @@ static int64_t last_theft_trigger_us = 0;
 void read_light_sensor(void *pvParameters) {
     while (1) {
         int raw = adc1_get_raw(LIGHT_SENS);
-        float percent;  // nome diverso dalla globale
+        float percent;
         if (raw <= LIGHT_RAW_MIN) {
             percent = 0.0f;
         } else if (raw >= LIGHT_RAW_MAX) {
@@ -77,11 +78,16 @@ void read_light_sensor(void *pvParameters) {
             percent = (float)(raw - LIGHT_RAW_MIN) / (LIGHT_RAW_MAX - LIGHT_RAW_MIN) * 100.0f;
         }
 
-        printf("Luce: raw=%d, %.1f%%\n", raw, percent);
-        // Scrivo il valore nella variabile condivisa, protetto da mutex
         xSemaphoreTake(g_light_mutex, portMAX_DELAY);
         g_light_percent = percent;
         xSemaphoreGive(g_light_mutex);
+        
+        // Stampa deploy: luce e stato ogni 1 secondo
+        xSemaphoreTake(g_tracking_mutex, portMAX_DELAY);
+        bool is_tracking = g_tracking_active;
+        xSemaphoreGive(g_tracking_mutex);
+        ESP_LOGI("STATUS", "Luce: %.1f%% | Stato: %s", percent, is_tracking ? "TRACKING" : "IDLE");
+        
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
@@ -97,44 +103,48 @@ void read_accelerometer_sensor(void *pvParameters) {
     float ax = 0, ay = 0, az = 0;
     float last_ax = 0, last_ay = 0, last_az = 0;
     float diff_x, diff_y, diff_z;
-    read_accel(&last_ax, &last_ay, &last_az);  // prima lettura per inizializzare i "last"
+    read_accel(&last_ax, &last_ay, &last_az);
     calibrate_theft_baseline(last_ax); 
+    
     while (1) {
         if (read_accel(&ax, &ay, &az)) {
-            diff_x = ax - last_ax; //backword differencies for first derivative
-            diff_y = ay - last_ay; //backword differencies for first derivative
-            diff_z = az - last_az; //backword differencies for first derivative
-            printf("ax=%.3f ay=%.3f az=%.3f | diff_x=%.3f diff_y=%.3f diff_z=%.3f\n",
-                   ax, ay, az, diff_x, diff_y, diff_z);
-            // impact sull'asse trasversale/longitudinale reale (z), non su x che e' l'asse gravita'
+            diff_x = ax - last_ax;
+            diff_y = ay - last_ay;
+            diff_z = az - last_az;
+            
+            // Sopprime i warning di variabile inutilizzata (utile se in futuro vorrai usarle)
+            (void)diff_x;
+            (void)diff_y;
+
+            // --- IMPACT ---
             xSemaphoreTake(g_threshold_mutex, portMAX_DELAY);
             float impact_th = g_impact_threshold;
             xSemaphoreGive(g_threshold_mutex);
+            
             if (fabs(diff_z) > impact_th) {
                 char event_buf[64];
                 int elen = snprintf(event_buf, sizeof(event_buf),
                                     "{\"type\":\"impact\",\"axis\":\"z\",\"value\":%.3f}", diff_z);
                 coap_push_event(event_buf, elen);
+                ESP_LOGW("EVENT", "IMPATTO rilevato (diff_z: %.3f)", diff_z);
             }
+            
+            // --- THEFT ---
             xSemaphoreTake(g_threshold_mutex, portMAX_DELAY);
             float theft_th = g_theft_displacement_threshold;
             xSemaphoreGive(g_threshold_mutex);
             
             xSemaphoreTake(g_theft_mutex, portMAX_DELAY);
             if (baseline_set) {
-                float displacement = ax - baseline_ax;   // theft sull'asse verticale reale (x)
+                float displacement = ax - baseline_ax;
                 
-                // --- LOGICA CON ISTERESI ---
                 if (fabs(displacement) > theft_th) {
                     theft_counter += 2;
                     if (theft_counter > 50) theft_counter = 50;
                 } else if (fabs(displacement) < (theft_th * 0.4f)) {
-                    // Il counter scende SOLO se il dispositivo torna chiaramente a riposo (sotto il 40% della soglia).
-                    // I micro-tremori nella "zona grigia" non riescono più ad azzerare i punti accumulati!
                     theft_counter -= 1;
                     if (theft_counter < 0) theft_counter = 0;
                 }
-                // Se fabs(displacement) è tra (theft_th * 0.4f) e theft_th, il counter RESTA CONGELATO.
                 
                 if (theft_counter >= THEFT_CONFIRM_SAMPLES) {
                     int64_t now_us = esp_timer_get_time();
@@ -143,11 +153,13 @@ void read_accelerometer_sensor(void *pvParameters) {
                         int elen = snprintf(event_buf, sizeof(event_buf),
                                             "{\"type\":\"theft\",\"axis\":\"x\",\"value\":%.3f}", displacement);
                         coap_push_event(event_buf, elen);
-                        // fa partire solo il gps, non e' piu uno stato di allarme condiviso
+                        
                         xSemaphoreTake(g_tracking_mutex, portMAX_DELAY);
                         g_tracking_active = true;
                         xSemaphoreGive(g_tracking_mutex);
                         last_theft_trigger_us = now_us;
+                        
+                        ESP_LOGE("EVENT", "FURTO confermato (spostamento: %.3f)", displacement);
                     }
                     theft_counter = 0;
                 }
@@ -170,6 +182,7 @@ void read_accelerometer_sensor(void *pvParameters) {
 }
 
 void accel_avg_task(void *pvParameters) {
+    int print_counter = 0;
     while (1) {
         xSemaphoreTake(g_accel_mutex, portMAX_DELAY);
         if (sample_count > 0) {
@@ -177,20 +190,21 @@ void accel_avg_task(void *pvParameters) {
             g_avg_ay = sum_ay / sample_count;
             g_avg_az = sum_az / sample_count;
         }
-        printf("Media 250ms: ax=%.3f ay=%.3f az=%.3f (n=%d)\n",g_avg_ax, g_avg_ay, g_avg_az, sample_count);
+        
         sum_ax = sum_ay = sum_az = 0;
         sample_count = 0;
         xSemaphoreGive(g_accel_mutex);
         
-        // Ridotto da 1000ms a 250ms: la media ora copre ~25 campioni invece di 100.
-        // Molto più reattiva, specialmente quando fai il reset per ricalibrare la baseline!
+        // Stampa l'accelerazione media ogni 1 secondo (4 cicli da 250ms)
+        print_counter++;
+        if (print_counter >= 4) {
+            ESP_LOGI("ACCEL", "Media: ax=%.3f ay=%.3f az=%.3f", g_avg_ax, g_avg_ay, g_avg_az);
+            print_counter = 0;
+        }
+        
         vTaskDelay(pdMS_TO_TICKS(250)); 
     }
 }
-
-// Task: dopo un furto confermato pinga il gps, finche' non arriva un reset
-// (non e' piu legata a un "allarme" generico, solo al tracking post-furto)
-#define GPS_WARMUP_INTERVAL_MS 2000  // polling "a riposo" per tenere il modulo caldo (evita cold start al bisogno)
 
 void gps_ping_task(void *pvParameters) {
     while (1) {
@@ -199,26 +213,24 @@ void gps_ping_task(void *pvParameters) {
         tracking = g_tracking_active;
         xSemaphoreGive(g_tracking_mutex);
 
-        // il GPS viene interrogato SEMPRE, non solo quando serve, cosi' arriva
-        // gia' "caldo" (fix acquisito) nel momento in cui scatta un furto
         float lat, lon;
         if (read_gps(&lat, &lon)) {
-            ESP_LOGI("GPS_TASK", "Fix GPS: lat=%.6f lon=%.6f", lat, lon);
             if (tracking) {
+                // Stampa GPS solo quando il tracking è attivo (furto in corso)
+                ESP_LOGI("GPS", "Posizione: lat=%.6f, lon=%.6f", lat, lon);
                 char event_buf[64];
                 int elen = snprintf(event_buf, sizeof(event_buf),
                                     "{\"type\":\"position\",\"lat\":%.6f,\"lon\":%.6f}", lat, lon);
                 coap_push_event(event_buf, elen);
             }
-        } else {
-            ESP_LOGW("GPS_TASK", "Nessun fix GPS disponibile");
         }
 
         vTaskDelay(pdMS_TO_TICKS(tracking ? GPS_PING_INTERVAL_MS : GPS_WARMUP_INTERVAL_MS));
     }
 }
 
-//coap heandlers
+// --- COAP HANDLERS ---
+
 static void hnd_get_light(coap_resource_t *resource, coap_session_t *session, const coap_pdu_t *request, const coap_string_t *query, coap_pdu_t *response) {
     float value;
     xSemaphoreTake(g_light_mutex, portMAX_DELAY);
@@ -226,16 +238,14 @@ static void hnd_get_light(coap_resource_t *resource, coap_session_t *session, co
     xSemaphoreGive(g_light_mutex);
     char buf[16];
     int len = snprintf(buf, sizeof(buf), "%.1f", value);
-    coap_pdu_set_code(response, COAP_RESPONSE_CODE_CONTENT); // 2.05
+    coap_pdu_set_code(response, COAP_RESPONSE_CODE_CONTENT);
     coap_add_data(response, len, (const uint8_t *)buf);
 }
 
 static void hnd_get_accel(coap_resource_t *resource, coap_session_t *session, const coap_pdu_t *request, const coap_string_t *query, coap_pdu_t *response) {
     float ax, ay, az;
     xSemaphoreTake(g_accel_mutex, portMAX_DELAY);
-    ax = g_avg_ax;
-    ay = g_avg_ay;
-    az = g_avg_az;
+    ax = g_avg_ax; ay = g_avg_ay; az = g_avg_az;
     xSemaphoreGive(g_accel_mutex);
     char buf[64];
     int len = snprintf(buf, sizeof(buf), "{\"ax\":%.3f,\"ay\":%.3f,\"az\":%.3f}", ax, ay, az);
@@ -252,7 +262,6 @@ static void hnd_get_events(coap_resource_t *resource, coap_session_t *session, c
     }
 }
 
-// GET /thresholds: soglie correnti, entrambe insieme
 static void hnd_get_thresholds(coap_resource_t *resource, coap_session_t *session, const coap_pdu_t *request, const coap_string_t *query, coap_pdu_t *response) {
     float impact, theft_disp;
     xSemaphoreTake(g_threshold_mutex, portMAX_DELAY);
@@ -265,12 +274,16 @@ static void hnd_get_thresholds(coap_resource_t *resource, coap_session_t *sessio
     coap_add_data(response, len, (const uint8_t *)buf);
 }
 
-// PUT /thresholds/impact: payload plain text, un solo float, niente json
 static void hnd_put_impact_threshold(coap_resource_t *resource, coap_session_t *session, const coap_pdu_t *request, const coap_string_t *query, coap_pdu_t *response) {
     size_t data_len = 0;
     const uint8_t *data = NULL;
     coap_get_data(request, &data_len, &data);
+
+    ESP_LOGI("DIAG", "PUT /thresholds/impact ricevuto: data_len=%d, data='%.*s'", 
+             (int)data_len, (int)data_len, data ? (const char*)data : "NULL");
+
     if (data == NULL || data_len == 0 || data_len > 15) {
+        ESP_LOGW("DIAG", "Payload non valido (NULL, vuoto o troppo lungo)");
         coap_pdu_set_code(response, COAP_RESPONSE_CODE_BAD_REQUEST);
         return;
     }
@@ -278,23 +291,31 @@ static void hnd_put_impact_threshold(coap_resource_t *resource, coap_session_t *
     memcpy(buf, data, data_len);
     buf[data_len] = '\0';
     float value = strtof(buf, NULL);
+
+    ESP_LOGI("DIAG", "Valore parsato con strtof: %.6f", value);
+
     if (value < THRESHOLD_MIN || value > THRESHOLD_MAX) {
+        ESP_LOGW("DIAG", "Valore %.3f fuori range [%.2f, %.2f]", value, THRESHOLD_MIN, THRESHOLD_MAX);
         coap_pdu_set_code(response, COAP_RESPONSE_CODE_BAD_REQUEST);
         return;
     }
     xSemaphoreTake(g_threshold_mutex, portMAX_DELAY);
     g_impact_threshold = value;
     xSemaphoreGive(g_threshold_mutex);
-    ESP_LOGI("THRESHOLDS", "impact aggiornata: %.3f", value);
-    coap_pdu_set_code(response, COAP_RESPONSE_CODE_CHANGED); // 2.04
+    ESP_LOGI("CONFIG", "Soglia impatto aggiornata: %.3f", value);
+    coap_pdu_set_code(response, COAP_RESPONSE_CODE_CHANGED);
 }
 
-// PUT /thresholds/theft: stesso discorso, ma sulla soglia di spostamento furto
 static void hnd_put_theft_threshold(coap_resource_t *resource, coap_session_t *session, const coap_pdu_t *request, const coap_string_t *query, coap_pdu_t *response) {
     size_t data_len = 0;
     const uint8_t *data = NULL;
     coap_get_data(request, &data_len, &data);
+
+    ESP_LOGI("DIAG", "PUT /thresholds/theft ricevuto: data_len=%d, data='%.*s'", 
+             (int)data_len, (int)data_len, data ? (const char*)data : "NULL");
+
     if (data == NULL || data_len == 0 || data_len > 15) {
+        ESP_LOGW("DIAG", "Payload non valido (NULL, vuoto o troppo lungo)");
         coap_pdu_set_code(response, COAP_RESPONSE_CODE_BAD_REQUEST);
         return;
     }
@@ -302,19 +323,23 @@ static void hnd_put_theft_threshold(coap_resource_t *resource, coap_session_t *s
     memcpy(buf, data, data_len);
     buf[data_len] = '\0';
     float value = strtof(buf, NULL);
+
+    ESP_LOGI("DIAG", "Valore parsato con strtof: %.6f", value);
+
     if (value < THRESHOLD_MIN || value > THRESHOLD_MAX) {
+        ESP_LOGW("DIAG", "Valore %.3f fuori range [%.2f, %.2f]", value, THRESHOLD_MIN, THRESHOLD_MAX);
         coap_pdu_set_code(response, COAP_RESPONSE_CODE_BAD_REQUEST);
         return;
     }
     xSemaphoreTake(g_threshold_mutex, portMAX_DELAY);
     g_theft_displacement_threshold = value;
     xSemaphoreGive(g_threshold_mutex);
-    ESP_LOGI("THRESHOLDS", "theft aggiornata: %.3f", value);
-    coap_pdu_set_code(response, COAP_RESPONSE_CODE_CHANGED); // 2.04
+    ESP_LOGI("CONFIG", "Soglia furto aggiornata: %.3f", value);
+    coap_pdu_set_code(response, COAP_RESPONSE_CODE_CHANGED);
 }
 
-// Handler PUT: resetta il tracking gps e ricalibra la baseline
 static void hnd_put_reset_alarm(coap_resource_t *resource, coap_session_t *session, const coap_pdu_t *request, const coap_string_t *query, coap_pdu_t *response) {
+    ESP_LOGI("DIAG", "PUT /reset_alarm ricevuto");
     xSemaphoreTake(g_tracking_mutex, portMAX_DELAY);
     g_tracking_active = false;
     xSemaphoreGive(g_tracking_mutex);
@@ -323,17 +348,17 @@ static void hnd_put_reset_alarm(coap_resource_t *resource, coap_session_t *sessi
     theft_counter = 0;
     xSemaphoreGive(g_theft_mutex);
     
-    // Prendo la media attuale (ora aggiornata ogni 250ms, quindi molto più fedele alla posizione reale istantanea)
     xSemaphoreTake(g_accel_mutex, portMAX_DELAY);
     float current_ax = g_avg_ax;
     xSemaphoreGive(g_accel_mutex);
     
     calibrate_theft_baseline(current_ax);
-    coap_pdu_set_code(response, COAP_RESPONSE_CODE_CHANGED); // 2.04
+    
+    ESP_LOGI("SYSTEM", "Reset allarme: tracking disattivato e baseline ricalibrata.");
+    coap_pdu_set_code(response, COAP_RESPONSE_CODE_CHANGED);
 }
 
 void app_main(void){
-    // Init NVS (richiesto dal WiFi per salvare config)
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -341,30 +366,29 @@ void app_main(void){
     }
     ESP_ERROR_CHECK(ret);
     
-    wifi_init_sta(WIFI_SSID, WIFI_PASSWORD);// blocca finché non sei connesso
+    wifi_init_sta(WIFI_SSID, WIFI_PASSWORD);
     
     if (!init_gps(GPS_UART_NUM, GPS_TX_PIN, GPS_RX_PIN, GPS_BAUD_RATE)) {
         ESP_LOGE("MAIN", "GPS init failed");
     }
     
-    // Inizializzazione photoresistor
     adc1_config_width(ADC_WIDTH_BIT_12);
-    adc1_config_channel_atten(LIGHT_SENS, ADC_ATTEN_DB_11);
-    g_light_mutex = xSemaphoreCreateMutex();
+    adc1_config_channel_atten(LIGHT_SENS, ADC_ATTEN_DB_12);
     
-    // Inizializzazione accelerometer
     if (!init_accelerometer(SDA_ACC_SENS, SCL_ACC_SENS)) {
         ESP_LOGE("MAIN", "Accelerometer init failed");
     }
+    
+    g_light_mutex = xSemaphoreCreateMutex();
     g_accel_mutex = xSemaphoreCreateMutex();
     g_theft_mutex = xSemaphoreCreateMutex();
     g_tracking_mutex = xSemaphoreCreateMutex();
     g_threshold_mutex = xSemaphoreCreateMutex();
     
-    //Inizializzazione server coap
     if (!coap_server_setup()) {
         ESP_LOGE("MAIN", "CoAP setup failed");
     }
+    
     coap_register_get_resource("light", hnd_get_light);
     coap_register_get_resource("accel", hnd_get_accel); 
     coap_register_observable_resource("events", hnd_get_events);

@@ -61,6 +61,18 @@ export async function writeEvent(event) {
 }
 
 /**
+ * Scrive le soglie correnti impact/theft, cosi' Grafana puo' mostrarle
+ * come stat panel invece di dover interrogare il WoT ad ogni refresh.
+ */
+export async function writeThresholds({ impact, theft_displacement }) {
+    safeWrite(
+        new Point("device_thresholds")
+            .floatField("impact", impact)
+            .floatField("theft_displacement", theft_displacement)
+    );
+}
+
+/**
  * Scrive una posizione GPS ricevuta durante il tracking post-furto
  * (evento alarmEvent con type "position", vedi gps_ping_task nel firmware
  * e gps_task nel mock). Measurement dedicata cosi' Grafana puo' mostrare

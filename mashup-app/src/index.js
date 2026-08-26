@@ -30,7 +30,7 @@ async function main() {
 
     // Internal REST API: exposes actions (e.g., reset alarm) to external clients
     // such as Grafana, without requiring them to talk directly to the WoT Controller
-    startApiServer(actuator);
+    startApiServer(sensor, actuator);
 
 }
 
