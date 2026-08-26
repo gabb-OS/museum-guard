@@ -6,6 +6,7 @@ const { HttpClientFactory } = pkg;
 import { startTelemetryPolling } from "./logic/telemetryPoller.js";
 import { registerAlarmHandler } from "./logic/alarmHandler.js";
 import { closeInflux } from "./services/influxService.js";
+import { startApiServer } from "./api/server.js";
 
 async function main() {
 	const servient = new Servient();
@@ -26,6 +27,10 @@ async function main() {
 
     // Pub-Sub Event driven impact-theft alarm handling
     registerAlarmHandler(sensor, actuator);
+
+    // Internal REST API: exposes actions (e.g., reset alarm) to external clients
+    // such as Grafana, without requiring them to talk directly to the WoT Controller
+    startApiServer(actuator);
 
 }
 

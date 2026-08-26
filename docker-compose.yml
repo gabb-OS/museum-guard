@@ -25,6 +25,7 @@ services:
       - INFLUXDB_ORG=${INFLUXDB_ORG}
       - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
       - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      - GF_INSTALL_PLUGINS=volkovlabs-form-panel
     ports:
       - "3000:3000"
     volumes:
@@ -37,6 +38,8 @@ services:
   mashup-app:
     build: ./mashup-app
     container_name: museumguard-mashup
+    ports:
+      - "3001:3001"
     volumes:
       - ./mashup-app/src:/app/src
     environment:
@@ -50,6 +53,7 @@ services:
       - TELEGRAM_BOT_CHAT_ID=${TELEGRAM_BOT_CHAT_ID}
       - PREDICTIVE_LIGHT_URL=http://predictive-light:8000
       - PREDICTIVE_LIGHT_TIMEOUT_MS=${PREDICTIVE_LIGHT_TIMEOUT_MS:-3000}
+      - MASHUP_SERVER_API_PORT=${MASHUP_SERVER_API_PORT:-3001}
     depends_on:
       - node-wot
       - influxdb

@@ -252,6 +252,53 @@
           "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"prediction_error\")\n  |> filter(fn: (r) => r._field == \"error\" or r._field == \"ema_error\")"
         }
       ]
+    },
+    {
+      "id": 12,
+      "title": "Reset Alarm",
+      "type": "volkovlabs-form-panel",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 52
+      },
+      "datasource": null,
+      "options": {
+        "layout": {
+          "variant": "none"
+        },
+        "elements": [],
+        "sync": false,
+        "initial": {
+          "method": "none"
+        },
+        "update": {
+          "method": "POST",
+          "url": "http://localhost:3001/api/resetalarm",
+          "contentType": "application/json",
+          "confirm": true
+        },
+        "confirmModal": {
+          "body": "Confermi il reset degli allarmi (IMPACT/THEFT -> IDLE)?"
+        },
+        "submit": {
+          "variant": "destructive",
+          "icon": "sync",
+          "text": "Reset Alarms"
+        },
+        "reset": {
+          "variant": "hidden"
+        },
+        "saveDefault": {
+          "variant": "hidden"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": []
     }
   ]
 }

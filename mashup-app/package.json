@@ -11,6 +11,8 @@
     "@node-wot/core": "^0.8.0",
     "@node-wot/binding-http": "^0.8.0",
     "@influxdata/influxdb-client": "^1.35.0",
-    "node-telegram-bot-api": "^2.0.0"
+    "node-telegram-bot-api": "^2.0.0",
+    "express": "^5.2.1",
+    "cors": "2.8.5"
   }
 }

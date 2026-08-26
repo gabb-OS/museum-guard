@@ -18,4 +18,7 @@ export const config = {
         url: process.env.PREDICTIVE_LIGHT_URL || "http://predictive-light:8000",
         timeoutMs: parseInt(process.env.PREDICTIVE_LIGHT_TIMEOUT_MS || "3000", 10),
     },
+    expressSrv: {
+        port: parseInt(process.env.MASHUP_SERVER_API_PORT || "3001", 10),
+    }
 };
