@@ -13,21 +13,26 @@ export function registerAlarmHandler(sensor, actuator) {
         const event = await data.value();
         console.log("[ALARM]", event);
 
-        if (event.type === "impact") {
+        try {
+            if (event.type === "impact") {
             await writeEvent(event);
             await actuator.invokeAction("triggerImpactBlink");
             await sendAlertToBot(`IMPACT detected (axis ${event.axis}, value ${event.value})`);
 
-        } else if (event.type === "theft") {
-            await writeEvent(event);
-            await actuator.invokeAction("triggerTheftAlarm");
-            await sendAlertToBot(`THEFT detected (axis ${event.axis}, value ${event.value})`);
+            } else if (event.type === "theft") {
+                await writeEvent(event);
+                await actuator.invokeAction("triggerTheftAlarm");
+                await sendAlertToBot(`THEFT detected (axis ${event.axis}, value ${event.value})`);
 
-        } else if (event.type === "position") {
-            // Solo tracking/logging, nessuna azione sull'attuatore: la
-            // posizione arriva a raffica (ogni ~5s) finche' il furto non
-            // viene resettato via sensor.invokeAction("resetTracking").
-            await writePosition(event);
+            } else if (event.type === "position") {
+                // Solo tracking/logging, nessuna azione sull'attuatore: la
+                // posizione arriva a raffica (ogni ~5s) finche' il furto non
+                // viene resettato via sensor.invokeAction("resetTracking").
+                await writePosition(event);
+            }
+            } catch (err) {
+                console.error("[ALARM] Error handling alarm event:", err.message);
         }
+        
     }, (err) => console.error("[ALARM] ssubscribe error:", err.message));
 }
