@@ -10,6 +10,7 @@ if (!token || !org || !bucket) {
 }
 
 const writeApi = new InfluxDB({ url, token }).getWriteApi(org, bucket, "ms", {
+    flushInterval: 1000,   // invia ogni 1s invece che ogni 60s
     writeFailed: (error, lines, attempt) => {
         console.error(`[influxService] SCRITTURA FALLITA (tentativo ${attempt}):`, error.message);
         console.error("[influxService] righe scartate:", lines);

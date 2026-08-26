@@ -61,7 +61,7 @@ export async function createEspActTD(WoT) {
         } catch (err) {
             console.warn("[ESP_ACT] errore poll state:", err.message);
         }
-    }, 2000);
+    }, 1000);
 
     // 3. PROPERTIES con fallback sicuro (leggono dalla cache, NON fanno chiamate di rete sincrone)
     espActThing.setPropertyReadHandler("artworkLedBrightness", async () => {

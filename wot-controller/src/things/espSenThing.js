@@ -61,7 +61,7 @@ export async function createEspSenTD(WoT) {
             ambientLight = await getLightLevel();
             espSenThing.emitPropertyChange("ambientLight");
         } catch (err) { console.warn("[ESP_SEN] errore poll light:", err.message); }
-    }, 2000);
+    }, 1000);
     espSenThing.setPropertyReadHandler("ambientLight", async () => ambientLight);
 
     let accel = { ax: 0, ay: 0, az: 0 };
@@ -70,7 +70,7 @@ export async function createEspSenTD(WoT) {
             accel = await getAccelReading();
             espSenThing.emitPropertyChange("accelerometer");
         } catch (err) { console.warn("[ESP_SEN] errore poll accelerometro:", err.message); }
-    }, 2000);
+    }, 1000);
     espSenThing.setPropertyReadHandler("accelerometer", async () => accel);
 
     let thresholds = { impact: 0, theft_displacement: 0 };
