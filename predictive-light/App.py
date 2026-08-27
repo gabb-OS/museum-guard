@@ -6,6 +6,13 @@ modello ARIMA su finestra rolling ogni PREDICT_INTERVAL_S secondi, applica
 una bias correction adattiva (EMA degli errori di previsione passati) e
 scrive su InfluxDB sia le predizioni (measurement: predicted_light) sia gli
 errori di riconciliazione (measurement: prediction_error).
+
+Nota: il fit, la bias correction e la riconciliazione dell'errore lavorano
+sempre nello spazio "luce ambientale prevista" (stessa scala di ambient_light,
+comparabile 1:1 nel pannello Grafana dedicato e in predicted_light). Solo il
+valore restituito da GET /predict viene convertito nel target di luminosità
+artificiale del LED (relazione inversa: brightness = 100 - luce_ambientale_prevista),
+perché più luce ambientale c'è meno illuminazione artificiale serve.
 """
 import os
 import time
@@ -174,6 +181,7 @@ def write_prediction_error(predicted_value: float, actual_value: float, target_t
 class Predictor:
     """ARIMA con bias correction adattiva (EMA sull'errore)."""
     def __init__(self):
+        self.last_ambient_forecast: float | None = None  # resta in % di luce ambientale
         self.last_brightness: float | None = None
         self.last_order: tuple | None = None
         self.ema_error: float = 0.0  # bias corrente
@@ -222,14 +230,17 @@ class Predictor:
         # Clamp a [0, 100] (è una percentuale di luminosità)
         corrected = float(max(0.0, min(100.0, corrected)))
         
-        self.last_brightness = corrected
+        self.last_ambient_forecast = corrected
+        # target LED = inverso della luce ambientale prevista
+        self.last_brightness = float(max(0.0, min(100.0, 100.0 - corrected)))
         self.last_order = tuple(model.order)
         self.last_fit_ts = datetime.now(timezone.utc)
         
         logger.info(
-            "Fit OK order=%s steps_ahead=%d raw=%.2f bias=%.2f corrected=%.2f (window=%d)",
-            model.order, steps_ahead, raw_value, self.ema_error, corrected, len(values),
+            "Fit OK order=%s steps_ahead=%d raw=%.2f bias=%.2f ambient_forecast=%.2f led_target=%.2f (window=%d)",
+            model.order, steps_ahead, raw_value, self.ema_error, corrected, self.last_brightness, len(values),
         )
+        
         return corrected
 
 predictor = Predictor()
@@ -312,6 +323,7 @@ async def predict():
 async def health():
     return {
         "status": "ok",
+        "last_ambient_forecast": predictor.last_ambient_forecast,
         "last_brightness": predictor.last_brightness,
         "last_order": list(predictor.last_order) if predictor.last_order else None,
         "ema_bias": predictor.ema_error,

@@ -25,7 +25,26 @@ export function startApiServer(sensor, actuator, port = config.expressSrv) {
     app.post("/api/resetalarm", async (req, res) => {
         try {
             console.log("[API] Richiesta reset allarme ricevuta");
-            await actuator.invokeAction("resetAlarmLight");
+
+            // Reset in parallelo: LED d'allarme (actuator) + tracking/baseline (sensor)
+            const [actuatorResult, sensorResult] = await Promise.allSettled([
+                actuator.invokeAction("resetAlarmLight"),
+                sensor.invokeAction("resetTracking"),
+            ]);
+
+            const errors = [actuatorResult, sensorResult]
+                .filter(r => r.status === "rejected")
+                .map(r => r.reason?.message ?? String(r.reason));
+
+            if (errors.length > 0) {
+                console.error("[API] Reset parziale, errori:", errors);
+                return res.status(502).json({
+                    status: "partial_error",
+                    message: "Reset non completato su tutti i dispositivi",
+                    errors,
+                });
+            }
+
             res.json({ status: "ok", message: "Alarm reset triggered" });
         } catch (err) {
             console.error("[API] Errore durante il reset:", err.message);
