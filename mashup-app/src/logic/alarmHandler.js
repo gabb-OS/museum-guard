@@ -26,7 +26,7 @@ export function registerAlarmHandler(sensor, actuator) {
 
             } else if (event.type === "position") {
                 // Solo tracking/logging, nessuna azione sull'attuatore: la
-                // posizione arriva a raffica (ogni ~5s) finche' il furto non
+                // posizione arriva (ogni ~5s) finche' il furto non
                 // viene resettato via sensor.invokeAction("resetTracking").
                 await writePosition(event);
             }

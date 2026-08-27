@@ -22,13 +22,6 @@ export async function createEspActTD(WoT) {
         },
         actions: {
             regulateBrightness: {
-                // NOTA: lo schema accetta "number" (non "integer") perche'
-                // node-wot valida l'input contro la TD PRIMA di invocare
-                // l'action handler: se qui restasse "integer", un float
-                // (es. il predictive-light service che restituisce 80.49)
-                // verrebbe scartato con un errore di validazione ancora
-                // prima di entrare nell'handler sotto, che quindi non
-                // avrebbe mai la possibilita' di correggerlo.
                 description: "Modify artwork illumination level",
                 input: {
                     type: "number",

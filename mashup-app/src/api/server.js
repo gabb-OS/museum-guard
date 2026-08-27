@@ -1,5 +1,4 @@
 import express from "express";
-import cors from "cors";
 import {config} from "../config.js";
 
 
@@ -11,7 +10,6 @@ import {config} from "../config.js";
  */
 export function startApiServer(sensor, actuator, port = config.expressSrv) {
     const app = express();
-    //app.use(cors()); 
     app.use(express.json());
 
     app.use((req, res, next) => {
