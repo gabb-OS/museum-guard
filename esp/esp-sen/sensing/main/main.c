@@ -206,22 +206,67 @@ void accel_avg_task(void *pvParameters) {
     }
 }
 
+// --- GPS TASK AGGIORNATA CON LOGGING INTELLIGENTE E PRECISO ---
 void gps_ping_task(void *pvParameters) {
+    bool last_tracking = false;
+    bool last_has_fix = false;
+    int warmup_no_fix_counter = 0;
+
+    ESP_LOGI("GPS", "Task avviata. Modulo GPS in riscaldamento (warmup)...");
+
     while (1) {
+        // 1. Controlla lo stato del tracking
         bool tracking;
         xSemaphoreTake(g_tracking_mutex, portMAX_DELAY);
         tracking = g_tracking_active;
         xSemaphoreGive(g_tracking_mutex);
 
-        float lat, lon;
-        if (read_gps(&lat, &lon)) {
+        // Logga SOLO quando lo stato di tracking cambia
+        if (tracking != last_tracking) {
             if (tracking) {
-                // Stampa GPS solo quando il tracking è attivo (furto in corso)
-                ESP_LOGI("GPS", "Posizione: lat=%.6f, lon=%.6f", lat, lon);
+                ESP_LOGW("GPS", ">>> TRACKING ATTIVATO (Furto rilevato) <<<");
+            } else {
+                ESP_LOGI("GPS", "<<< TRACKING DISATTIVATO (Reset) <<<");
+            }
+            last_tracking = tracking;
+        }
+
+        // 2. Leggi il GPS
+        float lat = 0.0, lon = 0.0;
+        bool has_fix = read_gps(&lat, &lon);
+
+        // 3. Logga SOLO quando lo stato del Fix cambia (evita spam)
+        if (has_fix != last_has_fix) {
+            if (has_fix) {
+                ESP_LOGI("GPS", "Fix GPS ACQUISITO con successo!");
+            } else {
+                ESP_LOGW("GPS", "Fix GPS PERSO. Il modulo sta ricercando i satelliti...");
+            }
+            last_has_fix = has_fix;
+        }
+
+        // 4. Azioni e Logging basati sullo stato combinato
+        if (has_fix) {
+            if (tracking) {
+                // Stampa le coordinate ESATTE solo se siamo in modalità furto
+                ESP_LOGI("GPS", "Posizione (TRACKING): lat=%.6f, lon=%.6f", lat, lon);
                 char event_buf[64];
                 int elen = snprintf(event_buf, sizeof(event_buf),
                                     "{\"type\":\"position\",\"lat\":%.6f,\"lon\":%.6f}", lat, lon);
                 coap_push_event(event_buf, elen);
+            }
+        } else {
+            // Se siamo in tracking e NON abbiamo il fix, è un errore critico da segnalare
+            if (tracking) {
+                ESP_LOGE("GPS", "CRITICO: Tracking attivo ma NESSUN FIX GPS disponibile!");
+            } else {
+                // In warmup, stampiamo un promemoria ogni 15 tentativi (~30 secondi) 
+                // per confermare che la task non è bloccata, senza fare spam.
+                warmup_no_fix_counter++;
+                if (warmup_no_fix_counter >= 15) {
+                    ESP_LOGI("GPS", "Warmup: ancora in ricerca satelliti... (assicurati di essere all'aperto o vicino a una finestra)");
+                    warmup_no_fix_counter = 0;
+                }
             }
         }
 

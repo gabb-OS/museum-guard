@@ -2,13 +2,13 @@ menu "WiFi Configuration"
 
     config WIFI_SSID
         string "WiFi SSID"
-        default ""
+        default "ProgettoIoT"
         help
             SSID (network name) for the ESP32 to connect to.
 
     config WIFI_PASSWORD
         string "WiFi Password"
-        default ""
+        default "PasswordIoT"
         help
             Password for the WiFi network.
 
