@@ -766,7 +766,7 @@
                 },
                 "sync": false,
                 "update": {
-                  "code": "if (context.panel.response) {\n  context.grafana.notifySuccess(['Update', 'Values updated successfully.']);\n  context.grafana.refresh();\n} else {\n  context.grafana.notifyError(['Update', 'An error occurred updating values.']);\n}",
+                  "code": "if (context.panel.response && context.panel.response.status >= 200 && context.panel.response.status < 300) {\n  context.grafana.notifySuccess(['Update', 'Values updated successfully.']);\n  context.grafana.refresh();\n} else {\n  const msg = context.panel.response?.data?.message || 'An error occurred updating values.';\n  context.grafana.notifyError(['Update', msg]);\n}",
                   "confirm": true,
                   "contentType": "application/json",
                   "getPayload": "const payload = {};\ncontext.panel.elements.forEach((element) => {\n  if (!element.value) {\n    return;\n  }\n  payload[element.id] = element.value;\n})\nreturn payload;",
@@ -900,7 +900,7 @@
                 },
                 "sync": false,
                 "update": {
-                  "code": "if (context.panel.response) {\n  context.grafana.notifySuccess(['Update', 'Values updated successfully.']);\n  context.grafana.refresh();\n} else {\n  context.grafana.notifyError(['Update', 'An error occurred updating values.']);\n}",
+                  "code": "if (context.panel.response && context.panel.response.status >= 200 && context.panel.response.status < 300) {\n  context.grafana.notifySuccess(['Update', 'Values updated successfully.']);\n  context.grafana.refresh();\n} else {\n  const msg = context.panel.response?.data?.message || 'An error occurred updating values.';\n  context.grafana.notifyError(['Update', msg]);\n}",
                   "confirm": true,
                   "contentType": "application/json",
                   "getPayload": "const payload = {};\ncontext.panel.elements.forEach((element) => {\n  if (!element.value) {\n    return;\n  }\n  payload[element.id] = element.value;\n})\nreturn payload;",
@@ -1961,7 +1961,7 @@
       "timezone": "browser",
       "to": "now"
     },
-    "title": "MuseumGuard Copy",
+    "title": "MuseumGuard",
     "variables": []
   }
 }

@@ -36,9 +36,10 @@ static SemaphoreHandle_t g_theft_mutex;
 
 // photoresistor stuff
 #define LIGHT_SENS ADC1_CHANNEL_6
-#define LIGHT_RAW_MIN             350
+#define LIGHT_RAW_MIN             0
 #define LIGHT_RAW_MAX             3800
 static float g_light_percent = 0.0f;
+static int g_light_raw = 0;
 SemaphoreHandle_t g_light_mutex;
 
 // accelerometer stuff
@@ -79,6 +80,7 @@ void read_light_sensor(void *pvParameters) {
         }
 
         xSemaphoreTake(g_light_mutex, portMAX_DELAY);
+        g_light_raw = raw;
         g_light_percent = percent;
         xSemaphoreGive(g_light_mutex);
         
@@ -86,7 +88,7 @@ void read_light_sensor(void *pvParameters) {
         xSemaphoreTake(g_tracking_mutex, portMAX_DELAY);
         bool is_tracking = g_tracking_active;
         xSemaphoreGive(g_tracking_mutex);
-        ESP_LOGI("STATUS", "Luce: %.1f%% | Stato: %s", percent, is_tracking ? "TRACKING" : "IDLE");
+        ESP_LOGI("STATUS", "Luce RAW: %d | Percentuale: %.1f%% | Stato: %s", raw, percent, is_tracking ? "TRACKING" : "IDLE");
         
         vTaskDelay(pdMS_TO_TICKS(1000));
     }

@@ -137,25 +137,33 @@ void taskAmbientLight(void *pvParameters){
 
     while(1){
         xTaskNotifyWait(0x00, 0xFFFFFFFF, &brightness, portMAX_DELAY);
-        ESP_LOGI("LIGHT", "Artwork illumination change event received!");
+        ESP_LOGI("LIGHT", "Artwork illumination change event received! (Raw: %lu%%)", brightness);
 
-        // Gamma correction: l'occhio percepisce la luminosita' in modo
-        // logaritmico, non lineare. Senza questa curva, la seconda meta'
-        // della scala (specialmente >70%) risulta visivamente quasi
-        // indistinguibile pur essendo elettricamente corretta.
-        float normalized = brightness / 100.0f;
-        float gamma_corrected = powf(normalized, 2.2f);
-        uint32_t duty = (uint32_t)(gamma_corrected * 255.0f);
+        uint32_t duty = 0;
+
+        if (brightness == 0) {
+            duty = 0; // Spento completamente solo se richiesto esplicitamente
+        } else {
+            // 1. Mappiamo l'intervallo 1-100 in 0.0-1.0 per la curva gamma
+            float normalized = (brightness - 1) / 99.0f;
+            float gamma_corrected = powf(normalized, 2.2f);
+            
+            // 2. Definiamo una soglia minima di duty cycle (es. 15 su 255 = ~6% di luminosità)
+            // Questo impedisce al LED di spegnersi sotto il 15% di input.
+            // Se lo vuoi ancora più luminoso al minimo, alza questo valore a 20 o 25.
+            uint32_t min_duty = 15; 
+            
+            // 3. Riscaliamo il risultato della curva gamma tra min_duty e 255
+            duty = min_duty + (uint32_t)(gamma_corrected * (255.0f - min_duty));
+        }
 
         ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
         ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 
-         
         xSemaphoreTake(ambientLightMutex, portMAX_DELAY);
         g_currentBrightness = brightness;
         xSemaphoreGive(ambientLightMutex);
     }
-
 }
 
 void taskAlarmLedManager(void *pvParameters) {

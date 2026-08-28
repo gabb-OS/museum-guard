@@ -44,7 +44,10 @@ export async function getThresholds() {
 export async function setImpactThreshold(value) {
     try {
         const res = await client.put("/thresholds/impact", String(value));
-        return res.code; // 2.04 = COAP_RESPONSE_CODE_CHANGED
+        if (res.code !== "2.04") {
+            throw new Error(`Device rejected threshold value (code ${res.code})`);
+        }
+        return res.code;
     } catch (err) {
         handleDeviceError(err, "setting impact threshold");
     }
@@ -53,6 +56,9 @@ export async function setImpactThreshold(value) {
 export async function setTheftThreshold(value) {
     try {
         const res = await client.put("/thresholds/theft", String(value));
+        if (res.code !== "2.04") {
+            throw new Error(`Device rejected threshold value (code ${res.code})`);
+        }
         return res.code;
     } catch (err) {
         handleDeviceError(err, "setting theft threshold");
