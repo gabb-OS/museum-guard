@@ -7,7 +7,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/timers.h"
-
+#include <math.h>
 #include "shared.h"
 
 static const char *E_TAG = "MAIN";
@@ -139,7 +139,14 @@ void taskAmbientLight(void *pvParameters){
         xTaskNotifyWait(0x00, 0xFFFFFFFF, &brightness, portMAX_DELAY);
         ESP_LOGI("LIGHT", "Artwork illumination change event received!");
 
-        uint32_t duty = (brightness * 255) / 100;
+        // Gamma correction: l'occhio percepisce la luminosita' in modo
+        // logaritmico, non lineare. Senza questa curva, la seconda meta'
+        // della scala (specialmente >70%) risulta visivamente quasi
+        // indistinguibile pur essendo elettricamente corretta.
+        float normalized = brightness / 100.0f;
+        float gamma_corrected = powf(normalized, 2.2f);
+        uint32_t duty = (uint32_t)(gamma_corrected * 255.0f);
+
         ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
         ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 

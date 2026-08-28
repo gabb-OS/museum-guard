@@ -26,6 +26,7 @@ services:
       - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
       - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
       - GF_INSTALL_PLUGINS=volkovlabs-form-panel
+      - GF_LOG_LEVEL=warn      # <-- aggiunta: solo warning/error, non più info
     ports:
       - "3000:3000"
     volumes:
