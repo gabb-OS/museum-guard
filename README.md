@@ -12,34 +12,28 @@
 ### Architettura Generale
 
 ```text
-  +------------------+       CoAP        +--------------------+
+  +------------------+        CoAP       +--------------------+
   | ESP-SEN (Sensing)| ----------------> |                    |
   +------------------+                   |   WoT Controller   |
-                                          |    (PC Application)|
-  +------------------+       HTTP        |                    |
-  | ESP-ACT (Actuat.)| <----------------+---------+----------+
+  +------------------+        HTTP       |                    |
+  | ESP-ACT (Actuat.)| <-----------------+---------+----------+
   +------------------+                             |
-                                                    v
-                                          +--------------------+
-                                          | Mash-up Application|
-                                          +----+---------+-----+
-                                               |         |
-                                +--------------+         +-------------+
-                                v                                      v
-                          +----------+                          +------------+
-                          | InfluxDB |                          | Telegram   |
-                          +----+-----+                          | Alert Bot  |
-                               |                                +------------+
-                               v
-                          +----------+
-                          | Grafana  |
-                          +----------+
-                               ^
-                               |
-                     +--------------------+
-                     | predictive-light   |
-                     | (Python/FastAPI)   |
-                     +--------------------+
+                                                   v
+                                         +----------------------+
+                                         |  Mash-up Application |
+                                         +----+---------+---+---+
+                                              |         |   |
+                             +----------------+         |   +------------+
+                             |                          |                |
+                             v                          v                v
+                       +----------+           +--------------------+ +------------+
+                       | InfluxDB | <-------> | predictive-light   | | Telegram   |
+                       +----+-----+           | (Python/FastAPI)   | | Alert Bot  |
+                            |                 +--------------------+ +------------+
+                            v
+                       +----------+
+                       | Grafana  |
+                       +----------+
 ```
 
 I nodi sensoristici ed attuativi non comunicano mai direttamente tra loro: l'orchestrazione dei flussi e della logica applicativa avviene tramite il **Controller WoT** e l'applicazione **Mash-up**. Il servizio `predictive-light` legge lo storico da InfluxDB e viene interrogato dal Mash-up solo per ottenere la stima di luminosità: non parla mai direttamente con i dispositivi.
