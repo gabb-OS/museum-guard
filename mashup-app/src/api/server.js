@@ -1,6 +1,6 @@
 import express from "express";
 import {config} from "../config.js";
-
+import { stopLiveLocation } from "../services/telegramService.js"
 
 /**
  * Avvia il server HTTP del mashup-app.
@@ -44,7 +44,7 @@ export function startApiServer(sensor, actuator, port = config.expressSrv) {
                     errors,
                 });
             }
-
+            stopLiveLocation();
             res.json({ status: "ok", message: "Alarm reset triggered" });
         } catch (err) {
             console.error("[API] Errore durante il reset:", err.message);

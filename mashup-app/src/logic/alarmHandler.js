@@ -6,7 +6,7 @@ alarmEvent e' gia' un evento wot -> no polling, si subscribing
  */
 
 import { writeEvent, writePosition } from "../services/influxService.js";
-import { sendAlertToBot } from "../services/telegramService.js";
+import { sendAlertToBot, reportPosition } from "../services/telegramService.js";
 
 export function registerAlarmHandler(sensor, actuator) {
     sensor.subscribeEvent("alarmEvent", async (data) => {
@@ -29,6 +29,7 @@ export function registerAlarmHandler(sensor, actuator) {
                 // posizione arriva (ogni ~5s) finche' il furto non
                 // viene resettato via sensor.invokeAction("resetTracking").
                 await writePosition(event);
+                await reportPosition(event.lat, event.lon);
             }
             } catch (err) {
                 console.error("[ALARM] Error handling alarm event:", err.message);
