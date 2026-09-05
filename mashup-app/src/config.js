@@ -3,7 +3,7 @@ export const config = {
     sensorThingPath: "/sensor",
     actuatorThingPath: "/actuator",
 
-    telemetryPollMs: parseInt(process.env.TELEMETRY_POLL_MS || "5000", 10),
+    telemetryPollMs: parseInt(process.env.TELEMETRY_POLL_MS || "1000", 10),
 
     telegram: {
         botToken: process.env.TELEGRAM_BOT_TOKEN,

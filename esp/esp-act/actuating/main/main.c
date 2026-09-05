@@ -166,6 +166,26 @@ void taskAmbientLight(void *pvParameters){
     }
 }
 
+/*
+ * Lifecycle of `notified_bits` on each loop iteration:
+ *   1. The task blocks on xTaskNotifyWait(), waiting for a command bit
+ *      (CMD_BIT_RESET / CMD_BIT_THEFT / CMD_BIT_IMPACT / CMD_BIT_TIMEOUT)
+ *      or, while in STATE_IMPACT, for a short timeout that drives blinking.
+ *   2. xTaskNotifyWait() copies the task's internal notification value into
+ *      `notified_bits`, then clears ALL bits in that internal value
+ *      (ulBitsToClearOnExit = 0xFFFFFFFF), so the next notification starts
+ *      from a clean slate.
+ *   3. Multiple commands sent via eSetBits() before this task wakes up are
+ *      OR'ed together into the same notification, so `notified_bits` may
+ *      carry more than one flag at once. Each flag is tested independently
+ *      with bitwise AND (notified_bits & CMD_BIT_X); priority between
+ *      simultaneous flags is resolved by evaluation order in the
+ *      if / else if chain (RESET > THEFT > IMPACT > TIMEOUT).
+ *   4.The read value stays available in `notified_bits` for the rest of the
+ *     if-block, but the "source" (the task's internal FreeRTOS notification
+ *     value) has already been cleared, ready to accumulate new bits.
+ */
+void taskAlarmLedManager(void *pvParameters) {
 void taskAlarmLedManager(void *pvParameters) {
     alarm_state_t state = STATE_IDLE;
     uint32_t notified_bits; 
