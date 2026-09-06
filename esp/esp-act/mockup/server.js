@@ -5,17 +5,17 @@ const PORT = process.env.HTTP_PORT || 80;
 
 app.use(express.json());
 
-// Stato interno (simula quello del firmware)
+// Internal state mimicking the firmware
 let state = {
-  brightness: 30,          // valore iniziale come nel firmware? (nel main parte da 0, ma per test va bene)
+  brightness: 30,          // Starts at 0 in actual firmware, but 30 is fine for testing
   alarmState: 'IDLE'       // 'IDLE' | 'IMPACT' | 'THEFT'
 };
 
-let impactTimer = null;    // timer per il timeout dell'impact (20 secondi)
+let impactTimer = null;    // Tracks the 20-second impact timeout
 
 const DEVICE_ID = 'ESP_ACT';
 
-// Helper per resettare il timer impact
+// Clear the impact timeout timer
 function clearImpactTimer() {
   if (impactTimer) {
     clearTimeout(impactTimer);
@@ -23,7 +23,7 @@ function clearImpactTimer() {
   }
 }
 
-// Funzione per riportare a IDLE dopo 20 secondi (solo se è ancora in IMPACT)
+// Revert to IDLE after 20s, but only if still in IMPACT
 function startImpactTimer() {
   clearImpactTimer();
   impactTimer = setTimeout(() => {
@@ -32,10 +32,10 @@ function startImpactTimer() {
       state.alarmState = 'IDLE';
     }
     impactTimer = null;
-  }, 20000); // 20 secondi come nel firmware
+  }, 20000); // 20 seconds, matching firmware behavior
 }
 
-// -------------------- ROUTE HANDLER --------------------
+// -------------------- ROUTE HANDLERS --------------------
 
 // GET /
 app.get('/', (req, res) => {
@@ -74,12 +74,12 @@ app.post('/ambientlight', (req, res) => {
 // POST /impact
 app.post('/impact', (req, res) => {
   console.log('[IMPACT] Triggered');
-  // Se non siamo in THEFT, passiamo a IMPACT e avviamo il timer
+  // Switch to IMPACT and start timer, unless already in THEFT
   if (state.alarmState !== 'THEFT') {
     state.alarmState = 'IMPACT';
     startImpactTimer();
   } else {
-    // se siamo in THEFT, l'impact viene ignorato (come nel firmware)
+    // Ignore impact if THEFT is already active (matches firmware)
     console.log('[IMPACT] Ignored because THEFT is active');
   }
   res.json({
@@ -93,7 +93,7 @@ app.post('/impact', (req, res) => {
 app.post('/theft', (req, res) => {
   console.log('[THEFT] Triggered');
   state.alarmState = 'THEFT';
-  clearImpactTimer(); // il timer impact viene fermato
+  clearImpactTimer(); // Stop the impact timer
   res.json({
     id: DEVICE_ID,
     status: 'ok',
@@ -113,7 +113,7 @@ app.post('/reset', (req, res) => {
   });
 });
 
-// Avvia il server
+// Start the server
 app.listen(PORT, () => {
   console.log(`ESP-ACT-MOCK running on port ${PORT}`);
   console.log(`State: brightness=${state.brightness}, alarm=${state.alarmState}`);

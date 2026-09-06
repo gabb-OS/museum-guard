@@ -1,9 +1,8 @@
 # grafana/dashboards/dashboard-provider.yaml
 #
-# Dice a Grafana "carica automaticamente ogni .json che trovi in questa
-# cartella e mostrali come dashboard". Il file museumguard.json accanto
-# a questo viene raccolto cosi', senza bisogno di importarlo a mano
-# dalla UI.
+# this that Grafana automatically loads every .json file found in this
+# folder and displays it as a dashboard. The museumguard.json file next to
+# this one is collected this way, without having to import it manually from the UI.
 
 apiVersion: 1
 

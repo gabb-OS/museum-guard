@@ -136,7 +136,6 @@ static esp_err_t root_get_handler(httpd_req_t *req)
 
 static esp_err_t state_get_handler(httpd_req_t *req)
 {
-    // Ensure these functions are declared in shared.h
     int brightness = get_current_brightness();
     alarm_state_t state = get_current_alarm_state();
  

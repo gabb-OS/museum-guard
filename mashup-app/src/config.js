@@ -10,10 +10,8 @@ export const config = {
         chatId: process.env.TELEGRAM_BOT_CHAT_ID,
     },
 
-    // Servizio predictive-light (container Python separato). E' l'UNICO
-    // punto che decide la luminosita' target in condizioni normali;
-    // computeTargetBrightness in telemetryPoller.js resta solo come
-    // fallback esplicito se questo servizio non risponde.
+    // Predictive-light service (separate Python container). 
+    // Primary source for target brightness; telemetryPoller.js uses reactive fallback only if this fails.
     predictiveLight: {
         url: process.env.PREDICTIVE_LIGHT_URL || "http://predictive-light:8000",
         timeoutMs: parseInt(process.env.PREDICTIVE_LIGHT_TIMEOUT_MS || "3000", 10),

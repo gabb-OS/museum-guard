@@ -20,7 +20,7 @@ typedef enum {
 } alarm_state_t;
 
 
-/* ---------------- Handle condivisi (definiti in main.c) ---------------- */
+/* ---------------- Handle condivisi ---------------- */
 extern SemaphoreHandle_t ambientLightMutex;
 extern SemaphoreHandle_t alarmLightStateMutex;
 extern TaskHandle_t ambientLightTaskHandle;
@@ -31,7 +31,7 @@ extern TaskHandle_t resetTaskHandle;
 /* ---------------- Shared Vars ---------------- */
 extern int ambientBrightness;
 
-/* ---------------- Task entry point (definiti in main.c) ---------------- */
+/* ---------------- Task entry point ---------------- */
 void taskAmbientLight(void *pvParameters);
 void taskImpactLight(void *pvParameters);
 void taskTheftLight(void *pvParameters);
@@ -44,7 +44,7 @@ const char* alarm_state_to_string(alarm_state_t state);
 
 
 
-/* ---------------- Networking (definiti in networkConnect.c) ---------------- */
+/* ---------------- Networking ---------------- */
 void wifi_init_sta(void);
 httpd_handle_t start_webserver(void);
 

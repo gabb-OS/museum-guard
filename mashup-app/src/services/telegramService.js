@@ -1,4 +1,4 @@
-import { Bot } from "node-telegram-bot-api"; // in realtà grammY sotto questo alias
+import { Bot } from "node-telegram-bot-api";
 import { config } from "../config.js";
 
 const token = config.telegram.botToken;

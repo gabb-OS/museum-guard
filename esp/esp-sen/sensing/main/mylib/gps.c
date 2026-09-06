@@ -11,7 +11,7 @@ static const char *TAG = "GPS";
 static uart_port_t g_uart_num;
 static char g_line_buf[GPS_BUF_SIZE];
 
-// Inizializza la UART verso il modulo GPS. Ritorna true se ok.
+// Initializes the UART to the GPS module. Returns true if successful.
 bool init_gps(uart_port_t uart_num, int tx_pin, int rx_pin, int baud_rate) {
     g_uart_num = uart_num;
     uart_config_t cfg = {
@@ -27,7 +27,7 @@ bool init_gps(uart_port_t uart_num, int tx_pin, int rx_pin, int baud_rate) {
     return true;
 }
 
-// Converte una coordinata NMEA (ddmm.mmmm) in gradi decimali
+// Converts an NMEA coordinate (ddmm.mmmm) to decimal degrees
 static float nmea_to_decimal(const char *raw) {
     float value = atof(raw);
     int degrees = (int)(value / 100);
@@ -35,7 +35,7 @@ static float nmea_to_decimal(const char *raw) {
     return degrees + minutes / 60.0f;
 }
 
-// Legge dalla UART e cerca una frase $GxGGA completa; se c'è un fix valido, restituisce lat/lon
+// Reads from the UART and looks for a complete $GxGGA phrase; if there is a valid fix, returns lat/lon
 bool read_gps(float *lat, float *lon) {
     int len = uart_read_bytes(g_uart_num, (uint8_t *)g_line_buf, sizeof(g_line_buf) - 1, pdMS_TO_TICKS(1000));
     if (len <= 0) return false;
@@ -43,7 +43,7 @@ bool read_gps(float *lat, float *lon) {
 
     char *sentence = strstr(g_line_buf, "GGA");
     if (!sentence) return false;
-    sentence -= 2; // torna indietro a "$Gx" prima di "GGA"
+    sentence -= 2; // go back to "$Gx" before "GGA"
 
     char *fields[15] = {0};
     int nfields = 0;

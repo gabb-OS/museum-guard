@@ -2,7 +2,7 @@ FROM python:3.11-alpine
 
 WORKDIR /app
 
-# Installa strumenti di compilazione e autotools
+# Install build tools and autotools
 RUN apk add --no-cache build-base autoconf automake libtool
 
 COPY requirements.txt .

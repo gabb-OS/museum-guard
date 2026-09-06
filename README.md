@@ -1,15 +1,15 @@
 # MuseumGuard
 
 **W3C WoT-based Smart Artwork Protection System**
-*Progetto per il corso di Internet of Things (A.A. 2025-2026) — Università di Bologna (Unibo)*
+*Project for the Internet of Things course (A.Y. 2025-2026) — University of Bologna (Unibo)*
 
 ---
 
-## Descrizione del Progetto
+## Project Description
 
-**MuseumGuard** è un sistema IoT distribuito progettato per il monitoraggio continuo e la protezione attiva di opere d'arte in ambienti museali. Il sistema combina monitoraggio ambientale, rilevamento tempestivo di minacce (urti accidentali e tentativi di furto), controllo illuminotecnico adattivo e interoperabilità basata sullo standard **W3C Web of Things (WoT)**.
+**MuseumGuard** is a distributed IoT system designed for continuous monitoring and active protection of artworks in museum environments. The system combines environmental monitoring, timely threat detection (accidental impacts and theft attempts), adaptive lighting control, and interoperability based on the **W3C Web of Things (WoT)** standard.
 
-### Architettura Generale
+### General Architecture
 
 ```text
   +------------------+        CoAP       +--------------------+
@@ -36,303 +36,312 @@
                        +----------+
 ```
 
-I nodi sensoristici ed attuativi non comunicano mai direttamente tra loro: l'orchestrazione dei flussi e della logica applicativa avviene tramite il **Controller WoT** e l'applicazione **Mash-up**. Il servizio `predictive-light` legge lo storico da InfluxDB e viene interrogato dal Mash-up solo per ottenere la stima di luminosità: non parla mai direttamente con i dispositivi.
+The sensing and actuation nodes never communicate directly with each other: flow orchestration and application logic are handled by the **WoT Controller** and the **Mash-up** application. The `predictive-light` service reads history from InfluxDB and is only queried by the Mash-up to obtain the brightness estimate — it never talks directly to the devices.
 
 ---
 
-## Componenti del Sistema
+## System Components
 
-### 1. ESP-SEN — Nodo di Sensing
+### 1. ESP-SEN — Sensing Node
 
-* **Firmware:** ESP-IDF con task FreeRTOS dedicati ad acquisizione e trasmissione (`esp/esp-sen/sensing`).
-* **Hardware:** ESP32, sensore di luce ambientale (fotoresistore su ADC), accelerometro I2C a 3 assi (MPU6050), modulo GPS UART.
-* **Funzionalità:**
-  * Lettura periodica dell'intensità luminosa e dell'accelerazione triassiale.
-  * Rilevamento **urti accidentali** (variazione brusca sull'asse Z rispetto al campione precedente).
-  * Rilevamento **furti** (spostamento sostenuto sull'asse X rispetto a una baseline, confermato su più campioni consecutivi con cooldown anti-rimbalzo).
-  * Tracking GPS attivo automaticamente dopo un furto confermato, finché non arriva un reset.
-  * Configurazione dinamica delle soglie di urto/furto a runtime, senza ricompilazione.
-* **Protocollo:** CoAP (Constrained Application Protocol), porta UDP `5683`.
-* **Mock:** Python (`esp/esp-sen/mockup/esp_sen_mock.py`), stessa interfaccia CoAP del firmware reale.
+* **Firmware:** ESP-IDF with FreeRTOS tasks dedicated to acquisition and transmission (`esp/esp-sen/sensing`).
+* **Hardware:** ESP32, ambient light sensor (photoresistor on ADC), 3-axis I2C accelerometer (MPU6050), UART GPS module.
+* **Features:**
+  * Periodic reading of ambient light intensity and triaxial acceleration.
+  * **Accidental impact** detection (sudden variation on the Z axis relative to the previous sample).
+  * **Theft** detection (sustained displacement on the X axis relative to a baseline, confirmed over several consecutive samples with anti-bounce cooldown).
+  * GPS tracking automatically activated after a confirmed theft, until a reset is received.
+  * Dynamic runtime configuration of impact/theft thresholds, without recompilation.
+* **Protocol:** CoAP (Constrained Application Protocol), UDP port `5683`.
+* **Mock:** Python (`esp/esp-sen/mockup/esp_sen_mock.py`), same CoAP interface as the real firmware.
 
-### 2. ESP-ACT — Nodo di Attuazione
+### 2. ESP-ACT — Actuation Node
 
-* **Firmware:** ESP-IDF con task FreeRTOS per gestione LED ed endpoint HTTP (`esp/esp-act/actuating`).
-* **Hardware:** ESP32, LED PWM (illuminazione opera, dimmerabile via `ledc`), LED digitale dedicato a urto/furto.
-* **Funzionalità:**
-  * Controllo adattivo dell'illuminazione dell'opera tramite dimming PWM (0–100%).
-  * **Segnalazione Urto:** lampeggio del LED d'allarme per 20 secondi (timer software), interrompibile da un evento di furto.
-  * **Segnalazione Furto:** accensione permanente del LED d'allarme fino a reset manuale.
-* **Protocollo:** HTTP, porta `80` sul dispositivo reale (esposta come `8081` sul mock via Docker).
-* **Mock:** Node.js (`esp/esp-act/mockup/server.js`, `mockup-act.js`), stessa interfaccia HTTP del firmware reale.
+* **Firmware:** ESP-IDF with FreeRTOS tasks for LED management and HTTP endpoints (`esp/esp-act/actuating`).
+* **Hardware:** ESP32, PWM LED (artwork illumination, dimmable via `ledc`), dedicated digital LED for impact/theft.
+* **Features:**
+  * Adaptive control of artwork illumination via PWM dimming (0–100%).
+  * **Impact signaling:** alarm LED blinks for 20 seconds (software timer), interruptible by a theft event.
+  * **Theft signaling:** alarm LED turns on permanently until manually reset.
+* **Protocol:** HTTP, port `80` on the real device (exposed as `8081` on the mock via Docker).
+* **Mock:** Node.js (`esp/esp-act/mockup/server.js`, `mockup-act.js`), same HTTP interface as the real firmware.
 
 ### 3. WoT Controller (PC)
 
-Applicazione Node.js (`wot-controller/`) che astrae i due dispositivi fisici esponendoli come **W3C WoT Things** standardizzati via `@node-wot`, raggiungibile su `http://localhost:8080`:
+Node.js application (`wot-controller/`) that abstracts the two physical devices, exposing them as standardized **W3C WoT Things** via `@node-wot`, reachable at `http://localhost:8080`:
 
-* **Thing `sensor`** (`/sensor`) — espone ESP-SEN:
-  * *Properties:* `ambientLight`, `accelerometer` (`{ax, ay, az}`), `thresholds` (`{impact, theft_displacement}`) — tutte osservabili.
+* **`sensor` Thing** (`/sensor`) — exposes ESP-SEN:
+  * *Properties:* `ambientLight`, `accelerometer` (`{ax, ay, az}`), `thresholds` (`{impact, theft_displacement}`) — all observable.
   * *Actions:* `setImpactThreshold`, `setTheftThreshold`, `resetTracking`.
-  * *Events:* `alarmEvent` — notifica `impact` / `theft` / `position`.
-* **Thing `actuator`** (`/actuator`) — espone ESP-ACT:
-  * *Properties:* `artworkLedBrightness`, `alarmLightState` (`IDLE`/`IMPACT`/`THEFT`) — osservabili.
+  * *Events:* `alarmEvent` — notifies `impact` / `theft` / `position`.
+* **`actuator` Thing** (`/actuator`) — exposes ESP-ACT:
+  * *Properties:* `artworkLedBrightness`, `alarmLightState` (`IDLE`/`IMPACT`/`THEFT`) — observable.
   * *Actions:* `regulateBrightness`, `triggerImpactBlink`, `triggerTheftAlarm`, `resetAlarmLight`.
 
-Gli adapter verso i dispositivi fisici (CoAP per il sensore, HTTP per l'attuatore) vivono in `wot-controller/src/adapters/`.
+The adapters towards the physical devices (CoAP for the sensor, HTTP for the actuator) live in `wot-controller/src/adapters/`.
 
 ### 4. Mash-up Application (PC)
 
-Rappresenta il cuore logico del sistema (`mashup-app/`):
+Represents the logical core of the system (`mashup-app/`):
 
-* Consuma le Thing esposte dal Controller WoT (`clients/wotConsumer.js`).
-* Effettua polling periodico req/res di sensore + attuatore e persiste telemetria, eventi e soglie su **InfluxDB** (`logic/telemetryPoller.js`, `services/influxService.js`).
-* Sottoscrive l'evento `alarmEvent` in modalità pub/sub e reagisce ad urti/furti attivando gli attuatori corrispondenti e inviando notifiche Telegram (`logic/alarmHandler.js`).
-* Interroga il servizio `predictive-light` per la luminosità target, con fallback reattivo esplicito in caso di errore/timeout (`services/predictiveLightService.js`).
-* Espone una piccola REST API interna (`api/server.js`, porta `3001`) usata dai pannelli form di Grafana per azioni come reset allarme e aggiornamento soglie, senza che Grafana debba parlare direttamente col Controller WoT.
+* Consumes the Things exposed by the WoT Controller (`clients/wotConsumer.js`).
+* Performs periodic req/res polling of sensor + actuator and persists telemetry, events, and thresholds to **InfluxDB** (`logic/telemetryPoller.js`, `services/influxService.js`).
+* Subscribes to the `alarmEvent` event in pub/sub mode and reacts to impacts/thefts by triggering the corresponding actuators and sending Telegram notifications (`logic/alarmHandler.js`).
+* Queries the `predictive-light` service for the target brightness, with an explicit reactive fallback in case of error/timeout (`services/predictiveLightService.js`).
+* Exposes a small internal REST API (`api/server.js`, port `3001`) used by Grafana's form panels for actions such as alarm reset and threshold updates, without Grafana needing to talk directly to the WoT Controller.
 
 ### 5. Predictive Lighting Service
 
-Microservizio Python/FastAPI separato (`predictive-light/App.py`), containerizzato a parte:
+Standalone Python/FastAPI microservice (`predictive-light/App.py`), containerized separately, based on a **"refit-once, serve-many"** architecture: the expensive ARIMA re-fit and the serving of predictions to the Mash-up are decoupled, so the service can respond to `/predict` with fine granularity without having to refit the model on every call.
 
-* Rifitta un modello **ARIMA** (`pmdarima`) sulla finestra rolling di `ambient_light` letta da InfluxDB (`HISTORY_WINDOW_S` secondi), ogni `PREDICT_INTERVAL_S` secondi.
-* Applica una **bias correction adattiva**: mantiene una EMA (`EMA_ALPHA`) sugli errori delle previsioni passate, confrontando ogni previsione scaduta con il valore reale osservato dopo (`prediction_error`, measurement dedicata).
-* Espone `GET /predict` → `{"brightness": <float>}` (target LED, complementare alla luce ambientale prevista) e `GET /health` per diagnostica; risponde `503` finché non ha ancora un fit valido, così il Mash-up passa al fallback reattivo.
-* Scrive su InfluxDB sia le previsioni (`predicted_light`) sia gli errori di riconciliazione (`prediction_error`), entrambe visualizzabili in Grafana.
+* Every `PREDICT_INTERVAL_S` seconds (default `60`) it re-fits an **ARIMA** model (`pmdarima`) on the rolling window of `ambient_light` read from InfluxDB (`HISTORY_WINDOW_S` seconds), and in a single pass generates an **array of future forecasts** (`forecast_cache`), one every `FORECAST_STEP_S` seconds (default `1`), covering the interval up to the next refit.
+* `GET /predict` **never re-fits** the model: it only computes how much time has elapsed since the last refit and returns the cache point closest to "now" — near-zero computational cost, regardless of how often the Mash-up polls the endpoint.
+* Applies an **adaptive bias correction**: it maintains an EMA (`EMA_ALPHA`) over past forecast errors. Reconciliation still operates on a single reference point per refit cycle, selected at `PREDICTION_HORIZON_S` seconds after the fit (dedicated `prediction_error` measurement); that point is now extracted from the cache instead of being the sole output of the fit, but the reconciliation logic itself is unchanged.
+* Exposes `GET /predict` → `{"brightness": <float>}` (LED target, complementary to the predicted ambient light) and `GET /health` for diagnostics (also includes `forecast_cache_points` and `forecast_cache_age_s`); returns `503` until a valid fit is available, so the Mash-up falls back to the reactive rule.
+* Writes both the forecasts (`predicted_light`) and the reconciliation errors (`prediction_error`) to InfluxDB, both viewable in Grafana and tagged with `system=museumguard`, consistent with the rest of the measurements written by the Mash-up.
 
-> Nota di design: il fit/riconciliazione lavorano sempre nello spazio "luce ambientale prevista" (comparabile 1:1 con `ambient_light` reale nel pannello Grafana dedicato); solo il valore restituito da `/predict` viene convertito nel target di luminosità artificiale (relazione inversa: più luce ambientale prevista → meno luce artificiale serve).
+> Design note: the fit/reconciliation always operate in the "predicted ambient light" space (directly comparable 1:1 with the real `ambient_light` in the dedicated Grafana panel); only the value returned by `/predict` is converted into the artificial brightness target (inverse relation: the higher the predicted ambient light, the lower the artificial illumination required).
 
-### 6. Data Storage & Visualizzazione
+### 6. Data Storage & Visualization
 
-* **InfluxDB 2.7:** Time-series database per telemetria (`ambient_light`, `acceleration`, `actuator_state`), eventi (`impact_event`, `theft_event`, `position`), soglie (`device_thresholds`) e dati predittivi (`predicted_light`, `prediction_error`). Retention del bucket impostata a `INFLUXDB_RETENTION` (default `30d`) da `influxdb/init/01-setup.sh` al primo avvio.
-* **Grafana:** Dashboard `MuseumGuard` provisionata automaticamente (`grafana/dashboards/museumguard.json`) con grafici ambientali, tabelle eventi urto/furto, mappa GPS, stato attuatore, confronto luce prevista/reale, errore di predizione, e pannelli form (plugin `volkovlabs-form-panel`) per reset allarme e impostazione soglie — questi ultimi chiamano direttamente le API del Mash-up (`http://localhost:3001/api/...`).
+* **InfluxDB 2.7:** Time-series database for telemetry (`ambient_light`, `acceleration`, `actuator_state`), events (`impact_event`, `theft_event`, `position`), thresholds (`device_thresholds`), and predictive data (`predicted_light`, `prediction_error`). Bucket retention set via `INFLUXDB_RETENTION` (default `30d`) by `influxdb/init/01-setup.sh` on first startup.
+* **Grafana:** `MuseumGuard` dashboard automatically provisioned (`grafana/dashboards/museumguard.json`) with environmental charts, impact/theft event tables, GPS map, actuator state, predicted-vs-actual light comparison, prediction error, and form panels (`volkovlabs-form-panel` plugin) for alarm reset and threshold configuration — the latter call the Mash-up API (`http://localhost:3001/api/...`) directly.
 
 ### 7. Telegram Alert Bot
 
-Modulo `services/telegramService.js` nel Mash-up: invia notifiche di testo fire-and-forget alla chat configurata quando `alarmHandler.js` riceve un evento `impact` o `theft`. Se `TELEGRAM_BOT_TOKEN`/`TELEGRAM_BOT_CHAT_ID` non sono impostati, il bot resta disattivato senza bloccare il resto del sistema.
+`services/telegramService.js` module in the Mash-up: sends fire-and-forget text notifications to the configured chat whenever `alarmHandler.js` receives an `impact` or `theft` event. If `TELEGRAM_BOT_TOKEN`/`TELEGRAM_BOT_CHAT_ID` are not set, the bot remains disabled without blocking the rest of the system.
 
 ---
 
-## Funzionalità Bonus Implementate
+## Implemented Bonus Features
 
-* **Soglie di Rilevamento Configurabili:** aggiornamento a runtime delle soglie di urto (`thresholds/impact`) e furto (`thresholds/theft`) tramite il WoT Controller, senza ricompilazione del firmware, con range validato lato firmware (`THRESHOLD_MIN`–`THRESHOLD_MAX`, 0.05–5.00 g).
-* **Controllo Predittivo dell'Illuminazione:** modello ARIMA con bias correction adattiva che stima la luce ambientale nei successivi `PREDICTION_HORIZON_S` secondi e regola proattivamente il LED PWM, con fallback reattivo automatico in caso di indisponibilità del servizio predittivo.
-* **Telegram Alert Bot:** notifiche istantanee in caso di emergenza (urto/furto).
+* **Configurable Detection Thresholds:** runtime updates of the impact (`thresholds/impact`) and theft (`thresholds/theft`) thresholds through the WoT Controller, without firmware recompilation, with range validated on the firmware side (`THRESHOLD_MIN`–`THRESHOLD_MAX`, 0.05–5.00 g).
+* **Predictive Lighting Control:** ARIMA model with adaptive bias correction and a "refit-once, serve-many" architecture (periodic refit every `PREDICT_INTERVAL_S`, predictions served with `FORECAST_STEP_S` granularity from an in-memory cache) that estimates ambient light over the next `PREDICTION_HORIZON_S` seconds and proactively regulates the PWM LED, with automatic reactive fallback if the predictive service is unavailable.
+* **Telegram Alert Bot:** instant notifications in case of emergency (impact/theft).
 
 ---
 
-## Struttura del Repository
+## Repository Structure
 
 ```text
 museum-guard/
 ├── esp/
 │   ├── esp-act/
-│   │   ├── actuating/         # Firmware ESP-IDF (Nodo Attuazione)
+│   │   ├── actuating/         # ESP-IDF firmware (Actuation Node)
 │   │   │   └── main/          # main.c, networkConnect.c, shared.h
-│   │   └── mockup/            # Mock Node.js (server.js, mockup-act.js)
+│   │   └── mockup/            # Node.js mock (server.js, mockup-act.js)
 │   └── esp-sen/
-│       ├── sensing/           # Firmware ESP-IDF (Nodo Sensing)
+│       ├── sensing/           # ESP-IDF firmware (Sensing Node)
 │       │   └── main/
 │       │       └── mylib/     # accelerometer, gps, wifi, coap_server
-│       └── mockup/            # Mock Python (esp_sen_mock.py)
+│       └── mockup/            # Python mock (esp_sen_mock.py)
 ├── wot-controller/            # W3C WoT Controller (Node.js / node-wot)
 │   ├── src/
 │   │   ├── adapters/          # espAct-adapter.js, espSen-adapter.js
 │   │   ├── coap/              # coap-client.js
 │   │   ├── things/            # espActThing.js, espSenThing.js
 │   │   └── index.js
-│   └── mockup/                # script di test (testActThing.js)
+│   └── mockup/                # test scripts (testActThing.js)
 ├── mashup-app/                # Mash-up Application (Node.js)
 │   └── src/
-│       ├── api/                # server.js — REST API interna (porta 3001)
+│       ├── api/                # server.js — internal REST API (port 3001)
 │       ├── clients/             # wotConsumer.js
 │       ├── logic/               # telemetryPoller.js, alarmHandler.js
 │       ├── services/            # influxService.js, predictiveLightService.js, telegramService.js
 │       ├── config.js
 │       └── index.js
-├── predictive-light/           # Servizio predittivo (Python/FastAPI)
+├── predictive-light/           # Predictive service (Python/FastAPI)
 │   ├── App.py
 │   └── requirements.txt
-├── grafana/                    # Provisioning automatico e dashboard
+├── grafana/                    # Automatic provisioning and dashboard
 │   ├── datasources/             # influxdb.yml
 │   └── dashboards/              # dashboard.yml, museumguard.json
 ├── influxdb/
-│   └── init/                   # 01-setup.sh — retention bucket
-├── models/                     # File STL per case stampati in 3D
-├── schematics/                 # Schemi elettrici Fritzing (.fzz/.png)
-├── docker-compose.yml           # Orchestrazione completa dell'ambiente
-├── env.example                  # Template variabili d'ambiente
+│   └── init/                   # 01-setup.sh — bucket retention
+├── models/                     # STL files for 3D-printed cases
+├── schematics/                 # Fritzing circuit diagrams (.fzz/.png)
+├── docker-compose.yml           # Full environment orchestration
+├── env.example                  # Environment variables template
 ├── LICENSE
 └── README.md
 ```
 
 ---
 
-## Specifica delle Interfacce
+## Interface Specification
 
-### ESP-SEN (CoAP — porta `5683/udp`)
+### ESP-SEN (CoAP — port `5683/udp`)
 
-| Risorsa | Metodo | Body / Payload | Descrizione |
+| Resource | Method | Body / Payload | Description |
 | --- | --- | --- | --- |
-| `/light` | `GET` | — | Percentuale di luce ambientale rilevata (0–100) |
-| `/accel` | `GET` | — | Accelerazione media JSON `{"ax": float, "ay": float, "az": float}` |
-| `/events` | `GET` (osservabile) | — | Ultimo evento (`impact` / `theft` / `position`); notifica gli observer via CoAP Observe |
-| `/thresholds` | `GET` | — | Soglie correnti `{"impact": float, "theft_displacement": float}` |
-| `/thresholds/impact` | `PUT` | testo, valore numerico (0.05–5.00) | Aggiorna la soglia di urto; `4.00 BAD_REQUEST` se fuori range o payload non valido |
-| `/thresholds/theft` | `PUT` | testo, valore numerico (0.05–5.00) | Aggiorna la soglia di spostamento per il furto; stessa validazione |
-| `/reset_alarm` | `PUT` | — | Ricalibra la baseline dell'accelerometro e ferma il tracking GPS |
+| `/light` | `GET` | — | Detected ambient light percentage (0–100) |
+| `/accel` | `GET` | — | Average acceleration JSON `{"ax": float, "ay": float, "az": float}` |
+| `/events` | `GET` (observable) | — | Latest event (`impact` / `theft` / `position`); notifies observers via CoAP Observe |
+| `/thresholds` | `GET` | — | Current thresholds `{"impact": float, "theft_displacement": float}` |
+| `/thresholds/impact` | `PUT` | text, numeric value (0.05–5.00) | Updates the impact threshold; `4.00 BAD_REQUEST` if out of range or payload invalid |
+| `/thresholds/theft` | `PUT` | text, numeric value (0.05–5.00) | Updates the theft displacement threshold; same validation |
+| `/reset_alarm` | `PUT` | — | Recalibrates the accelerometer baseline and stops GPS tracking |
 
-### ESP-ACT (HTTP — porta `80` su dispositivo reale / `8081` sul mock Docker)
+### ESP-ACT (HTTP — port `80` on the real device / `8081` on the Docker mock)
 
-| Endpoint | Metodo | Body | Descrizione |
+| Endpoint | Method | Body | Description |
 | --- | --- | --- | --- |
-| `/` | `GET` | — | Health check base |
-| `/state` | `GET` | — | Stato corrente `{"id", "brightness", "alarmState"}` |
-| `/ambientlight` | `POST` | `{"brightness": 0-100}` | Regola la luminosità PWM del LED dell'opera |
-| `/impact` | `POST` | — | Attiva la segnalazione urto (lampeggio 20s) |
-| `/theft` | `POST` | — | Attiva la segnalazione furto (LED fisso acceso) |
-| `/reset` | `POST` | — | Reset dello stato d'allarme a `IDLE` |
+| `/` | `GET` | — | Basic health check |
+| `/state` | `GET` | — | Current state `{"id", "brightness", "alarmState"}` |
+| `/ambientlight` | `POST` | `{"brightness": 0-100}` | Sets the PWM brightness of the artwork LED |
+| `/impact` | `POST` | — | Triggers impact signaling (20s blink) |
+| `/theft` | `POST` | — | Triggers theft signaling (LED steady on) |
+| `/reset` | `POST` | — | Resets the alarm state to `IDLE` |
 
-### Mash-up API interna (HTTP — porta `3001`)
+### Internal Mash-up API (HTTP — port `3001`)
 
-Usata da Grafana (pannelli form) per non dover parlare direttamente col Controller WoT.
+Used by Grafana (form panels) so they don't need to talk directly to the WoT Controller.
 
-| Endpoint | Metodo | Body | Descrizione |
+| Endpoint | Method | Body | Description |
 | --- | --- | --- | --- |
 | `/api/health` | `GET` | — | Health check |
-| `/api/resetalarm` | `POST` | — | Invoca `resetAlarmLight` sull'attuatore |
-| `/api/thresholds` | `GET` | — | Legge le soglie correnti dal sensore (precompila i form Grafana) |
-| `/api/thresholds/impact` | `POST` | `{"value": number}` | Imposta la soglia di urto via Thing `sensor` |
-| `/api/thresholds/theft` | `POST` | `{"value": number}` | Imposta la soglia di furto via Thing `sensor` |
+| `/api/resetalarm` | `POST` | — | Invokes `resetAlarmLight` on the actuator |
+| `/api/thresholds` | `GET` | — | Reads current thresholds from the sensor (pre-fills Grafana forms) |
+| `/api/thresholds/impact` | `POST` | `{"value": number}` | Sets the impact threshold via the `sensor` Thing |
+| `/api/thresholds/theft` | `POST` | `{"value": number}` | Sets the theft threshold via the `sensor` Thing |
 
-### WoT Controller — Thing Descriptions (HTTP — porta `8080`)
+### WoT Controller — Thing Descriptions (HTTP — port `8080`)
 
-| Risorsa | Descrizione |
+| Resource | Description |
 | --- | --- |
-| `/sensor` | Thing Description del nodo di sensing (properties, actions, events elencati sopra) |
-| `/actuator` | Thing Description del nodo di attuazione |
+| `/sensor` | Thing Description of the sensing node (properties, actions, events listed above) |
+| `/actuator` | Thing Description of the actuation node |
+
+### Predictive Light Service (HTTP — port `8000`, reachable only within the internal Docker network)
+
+| Endpoint | Method | Description |
+| --- | --- | --- |
+| `/predict` | `GET` | `{"brightness": <float>}`, read from the forecast cache; `503` if no fit is available yet |
+| `/health` | `GET` | Diagnostics: last fit, current EMA bias, forecast cache size/age |
 
 ---
 
-## Guida all'Avvio
+## Getting Started
 
-### Requisiti Preliminari
+### Prerequisites
 
-* **Docker** e **Docker Compose**
-* **Node.js** (v18+) e **Python** (3.11+) *(solo per esecuzione standalone dei mockup, senza Docker)*
-* **ESP-IDF v5.x** *(solo per deployment su hardware reale)*
-* Token Bot Telegram (ottenibile tramite [@BotFather](https://t.me/BotFather))
+* **Docker** and **Docker Compose**
+* **Node.js** (v18+) and **Python** (3.11+) *(only for standalone execution of the mocks, without Docker)*
+* **ESP-IDF v5.x** *(only for deployment on real hardware)*
+* Telegram Bot Token (obtainable via [@BotFather](https://t.me/BotFather))
 
 ---
 
-### Avvio con Docker
+### Running with Docker
 
-Il sistema supporta più modalità di avvio, selezionabili tramite i **profili di Docker Compose** e un file di variabili d'ambiente.
+The system supports several startup modes, selectable via **Docker Compose profiles** and an environment variables file.
 
-#### Configurazione
+#### Configuration
 
-Il repository versiona solo il template `env.example`; copialo secondo lo scenario che ti serve (i nomi qui **non** hanno il punto iniziale, a differenza delle convenzioni `.env.*` più comuni):
+The repository only versions the `env.example` template; copy it according to the scenario you need (note: these names do **not** have a leading dot, unlike the more common `.env.*` convention):
 
 ```bash
-cp env.example env.mock    # per lavorare senza hardware (entrambi mockati)
-cp env.example env.real    # per lavorare con entrambi gli ESP32 reali
+cp env.example env.mock    # to work without hardware (both mocked)
+cp env.example env.real    # to work with both real ESP32s
 ```
 
-Nello scenario reale, imposta in `env.real` gli indirizzi IP dei dispositivi sulla tua LAN:
+In the real-hardware scenario, set the device IP addresses on your LAN in `env.real`:
 
 ```env
 ESP_SEN_ADDRESS=192.168.x.x
 ESP_ACT_ADDRESS=192.168.x.x
 ```
 
-> ⚠️ Il PC che esegue `docker compose` deve trovarsi sulla stessa rete WiFi degli ESP32 — il WoT Controller li raggiunge come client CoAP/HTTP in uscita, non serve nessuna porta esposta lato ESP32.
+> ⚠️ The PC running `docker compose` must be on the same WiFi network as the ESP32s — the WoT Controller reaches them as an outgoing CoAP/HTTP client, no port needs to be exposed on the ESP32 side.
 
-Per gli scenari **misti** (un nodo reale, l'altro mockato), l'unica differenza è che in `ESP_SEN_ADDRESS`/`ESP_ACT_ADDRESS` metti il nome del container mock per il nodo che vuoi simulare e l'IP reale per l'altro:
+For **mixed** scenarios (one real node, the other mocked), the only difference is that in `ESP_SEN_ADDRESS`/`ESP_ACT_ADDRESS` you put the mock container name for the node you want to simulate, and the real IP for the other:
 
 ```env
-# esempio: ESP-SEN reale collegato, ESP-ACT ancora mockato
+# example: ESP-SEN real device connected, ESP-ACT still mocked
 ESP_SEN_ADDRESS=192.168.1.42
 ESP_ACT_ADDRESS=esp-act-mock
 ```
 
-#### Variabili d'ambiente principali
+#### Main Environment Variables
 
-| Variabile | Default | Descrizione |
+| Variable | Default | Description |
 | --- | --- | --- |
-| `INFLUXDB_USERNAME` / `INFLUXDB_PASSWORD` | — | Credenziali admin InfluxDB (setup iniziale) |
-| `INFLUXDB_ORG` / `INFLUXDB_BUCKET` / `INFLUXDB_TOKEN` | — | Organizzazione, bucket e token InfluxDB, condivisi da tutti i servizi |
-| `INFLUXDB_RETENTION` | `30d` | Retention del bucket, applicata da `01-setup.sh` |
-| `GRAFANA_USER` / `GRAFANA_PASSWORD` | — | Credenziali admin Grafana |
-| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_BOT_CHAT_ID` | — | Bot Telegram; se assenti, gli alert restano disattivati |
-| `ESP_SEN_ADDRESS` / `ESP_ACT_ADDRESS` | `esp-sen-mock` / `esp-act-mock` | Host dei nodi (mock o IP reale sulla LAN) |
-| `COAP_PORT` / `HTTP_PORT` | — | Porte con cui il WoT Controller raggiunge ESP-SEN/ESP-ACT |
-| `TELEMETRY_POLL_MS` | `5000` | Intervallo di polling req/res sensore+attuatore nel Mash-up |
-| `MASHUP_SERVER_API_PORT` | `3001` | Porta della REST API interna del Mash-up |
-| `PREDICTIVE_LIGHT_URL` | `http://predictive-light:8000` | URL del servizio predittivo, visto dal Mash-up |
-| `PREDICTIVE_LIGHT_TIMEOUT_MS` | `3000` | Timeout della chiamata a `predictive-light` prima del fallback reattivo |
-| `PREDICT_INTERVAL_S` | `5` | Ogni quanti secondi `predictive-light` rifitta il modello |
-| `PREDICTION_HORIZON_S` | `30` | Orizzonte di previsione (secondi nel futuro) |
-| `HISTORY_WINDOW_S` | `600` | Finestra rolling di storico usata per il fit ARIMA |
-| `EMA_ALPHA` | `0.3` | Peso della EMA per la bias correction adattiva |
+| `INFLUXDB_USERNAME` / `INFLUXDB_PASSWORD` | — | InfluxDB admin credentials (initial setup) |
+| `INFLUXDB_ORG` / `INFLUXDB_BUCKET` / `INFLUXDB_TOKEN` | — | InfluxDB organization, bucket, and token, shared by all services |
+| `INFLUXDB_RETENTION` | `30d` | Bucket retention, applied by `01-setup.sh` |
+| `GRAFANA_USER` / `GRAFANA_PASSWORD` | — | Grafana admin credentials |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_BOT_CHAT_ID` | — | Telegram bot; if absent, alerts remain disabled |
+| `ESP_SEN_ADDRESS` / `ESP_ACT_ADDRESS` | `esp-sen-mock` / `esp-act-mock` | Node hosts (mock or real IP on the LAN) |
+| `COAP_PORT` / `HTTP_PORT` | — | Ports used by the WoT Controller to reach ESP-SEN/ESP-ACT |
+| `TELEMETRY_POLL_MS` | `5000` | Req/res polling interval of sensor+actuator in the Mash-up |
+| `MASHUP_SERVER_API_PORT` | `3001` | Port of the Mash-up's internal REST API |
+| `PREDICTIVE_LIGHT_URL` | `http://predictive-light:8000` | URL of the predictive service, as seen by the Mash-up |
+| `PREDICTIVE_LIGHT_TIMEOUT_MS` | `3000` | Timeout for the call to `predictive-light` before falling back to the reactive rule |
+| `PREDICT_INTERVAL_S` | `60` | How often (seconds) `predictive-light` re-fits the ARIMA model and regenerates the forecast cache ("refit-once, serve-many") |
+| `FORECAST_STEP_S` | `1` | Granularity (in seconds) of the forecasts served from the cache between one refit and the next; ideally aligned with `TELEMETRY_POLL_MS` |
+| `PREDICTION_HORIZON_S` | `30` | Forecast horizon used for reconciliation/EMA bias (seconds into the future relative to the fit) |
+| `HISTORY_WINDOW_S` | `600` | Rolling history window used for the ARIMA fit |
+| `EMA_ALPHA` | `0.3` | EMA weight for the adaptive bias correction |
 
-#### Clona ed avvia
+#### Clone and Run
 
 ```bash
-git clone https://github.com/tuo-username/museum-guard.git
+git clone https://github.com/your-username/museum-guard.git
 cd museum-guard
 ```
 
-**Con entrambi i mockup (ambiente di test, senza hardware):**
+**With both mocks (test environment, no hardware):**
 ```bash
 docker compose --env-file env.mock --profile mock up -d
 ```
 
-**Con un solo nodo mockato** (l'altro reale, indirizzo IP impostato in `env.mock`/`env.real`):
+**With a single mocked node** (the other real, IP address set in `env.mock`/`env.real`):
 ```bash
-docker compose --env-file env.mock --profile mock-sen up -d   # solo ESP-SEN mockato
-docker compose --env-file env.mock --profile mock-act up -d   # solo ESP-ACT mockato
+docker compose --env-file env.mock --profile mock-sen up -d   # only ESP-SEN mocked
+docker compose --env-file env.mock --profile mock-act up -d   # only ESP-ACT mocked
 ```
 
-**Con l'hardware reale collegato (entrambi i nodi):**
+**With real hardware connected (both nodes):**
 ```bash
 docker compose --env-file env.real up -d
 ```
-(qui i container mock *non* partono, anche restando definiti nel `docker-compose.yml`, perché non appartengono al profilo di default)
+(here the mock containers do *not* start, even though they remain defined in `docker-compose.yml`, because they don't belong to the default profile)
 
-Se preferisci non scrivere `--env-file` ad ogni comando, puoi copiare il file scelto su `.env` (che Compose carica automaticamente):
+If you'd rather not type `--env-file` every time, you can copy the chosen file to `.env` (which Compose loads automatically):
 ```bash
-cp env.mock .env   # oppure env.real, a seconda dello scenario
-docker compose --profile mock up -d          # entrambi mockati
-docker compose --profile mock-sen up -d      # solo sensing mockato
-docker compose up -d                         # hardware reale, nessun profilo
+cp env.mock .env   # or env.real, depending on the scenario
+docker compose --profile mock up -d          # both mocked
+docker compose --profile mock-sen up -d      # only sensing mocked
+docker compose up -d                         # real hardware, no profile
 ```
 
-#### Verifica i servizi attivi
+#### Check Running Services
 
-* **Grafana:** [http://localhost:3000](http://localhost:3000) — dashboard e datasource InfluxDB già provisionati
+* **Grafana:** [http://localhost:3000](http://localhost:3000) — dashboard and InfluxDB datasource already provisioned
 * **InfluxDB:** [http://localhost:8086](http://localhost:8086)
-* **WoT Controller:** [http://localhost:8080](http://localhost:8080) — Thing Description dei nodi esposti su `/sensor` e `/actuator`
+* **WoT Controller:** [http://localhost:8080](http://localhost:8080) — Thing Descriptions of the exposed nodes at `/sensor` and `/actuator`
 * **Mash-up API:** [http://localhost:3001/api/health](http://localhost:3001/api/health)
-* **Predictive Light:** raggiungibile solo internamente alla rete Docker (`http://predictive-light:8000`), non esposto sull'host
-* **ESP-SEN Mock** *(profili `mock` o `mock-sen`)*: `coap://localhost:5683`
-* **ESP-ACT Mock** *(profili `mock` o `mock-act`)*: [http://localhost:8081](http://localhost:8081)
+* **Predictive Light:** reachable only within the internal Docker network (`http://predictive-light:8000`), not exposed on the host
+* **ESP-SEN Mock** *(`mock` or `mock-sen` profiles)*: `coap://localhost:5683`
+* **ESP-ACT Mock** *(`mock` or `mock-act` profiles)*: [http://localhost:8081](http://localhost:8081)
 
-#### Arresto dei servizi
+#### Stopping the Services
 
 ```bash
 docker compose down
 ```
 
-### Esecuzione Standalone dei Mockup (senza Docker)
+### Standalone Execution of the Mocks (without Docker)
 
-Utile per sviluppare o debuggare un singolo mockup in isolamento:
+Useful for developing or debugging a single mock in isolation:
 
 ```bash
-# Mockup Sensing (ESP-SEN) — Python
+# Sensing mock (ESP-SEN) — Python
 cd esp/esp-sen/mockup
 pip install -r requirements.txt
 python esp_sen_mock.py
 
-# Mockup Attuazione (ESP-ACT) — Node.js
+# Actuation mock (ESP-ACT) — Node.js
 cd esp/esp-act/mockup
 npm install
 node server.js
@@ -340,6 +349,6 @@ node server.js
 
 ---
 
-## Licenza
+## License
 
-Questo progetto è distribuito sotto licenza **MIT**. Consulta il file [LICENSE](./LICENSE) per ulteriori dettagli.
+This project is distributed under the **MIT** license. See the [LICENSE](./LICENSE) file for details.

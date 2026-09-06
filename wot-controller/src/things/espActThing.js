@@ -41,10 +41,10 @@ export async function createEspActTD(WoT) {
         }
     });
 
-    // 1. Cache dello stato per evitare che un fallimento di rete blocchi la readProperty
+    // 1. State cache to prevent network failures from blocking readProperty
     let cachedState = { brightness: 0, alarmState: "IDLE" };
 
-    // 2. Polling periodico dello stato in background (con try/catch, come espSenThing)
+    // 2. Periodic background state polling (with try/catch, like espSenThing)
     setInterval(async () => {
         try {
             const state = await getActuatorState();
@@ -52,11 +52,11 @@ export async function createEspActTD(WoT) {
             espActThing.emitPropertyChange("artworkLedBrightness");
             espActThing.emitPropertyChange("alarmLightState");
         } catch (err) {
-            console.warn("[ESP_ACT] errore poll state:", err.message);
+            console.warn("[ESP_ACT] state poll error:", err.message);
         }
     }, 1000);
 
-    // 3. PROPERTIES con fallback sicuro (leggono dalla cache, NON fanno chiamate di rete sincrone)
+    // 3. PROPERTIES with safe fallback (read from cache, NO synchronous network calls)
     espActThing.setPropertyReadHandler("artworkLedBrightness", async () => {
         return cachedState.brightness;
     });
@@ -69,14 +69,12 @@ export async function createEspActTD(WoT) {
     espActThing.setActionHandler("regulateBrightness", async (params) => {
         const rawValue = await params.value();
 
-        // Normalizzazione centralizzata: qualunque chiamante (predittivo,
-        // fallback reattivo, futuri client WoT) puo' mandare un float o un
-        // valore leggermente fuori range senza doversene preoccupare, e'
-        // regulateBrightness stesso a decidere il valore fisico corretto.
+        // Centralized normalization: callers can send floats or out-of-range values. 
+        // regulateBrightness enforces the correct physical value.
         const brightness = Math.round(Math.min(100, Math.max(0, rawValue)));
 
         await setBrightness(brightness);
-        cachedState.brightness = brightness; // Aggiorna cache per coerenza immediata
+        cachedState.brightness = brightness; // Update cache for immediate consistency
         espActThing.emitPropertyChange("artworkLedBrightness");
         return;
     });

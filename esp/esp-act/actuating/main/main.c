@@ -142,18 +142,17 @@ void taskAmbientLight(void *pvParameters){
         uint32_t duty = 0;
 
         if (brightness == 0) {
-            duty = 0; // Spento completamente solo se richiesto esplicitamente
+            duty = 0; // Turned off completely only if explicitly requested
         } else {
-            // 1. Mappiamo l'intervallo 1-100 in 0.0-1.0 per la curva gamma
+            // 1. We map the range 1-100 to 0.0-1.0 for the gamma curve
             float normalized = (brightness - 1) / 99.0f;
             float gamma_corrected = powf(normalized, 2.2f);
             
-            // 2. Definiamo una soglia minima di duty cycle (es. 15 su 255 = ~6% di luminosità)
-            // Questo impedisce al LED di spegnersi sotto il 15% di input.
-            // Se lo vuoi ancora più luminoso al minimo, alza questo valore a 20 o 25.
+            // 2. Set a minimum duty cycle threshold
+            // This prevents the LED from turning off below 15% input.
             uint32_t min_duty = 15; 
             
-            // 3. Riscaliamo il risultato della curva gamma tra min_duty e 255
+            // 3. We rescale the gamma curve result between min_duty and 255
             duty = min_duty + (uint32_t)(gamma_corrected * (255.0f - min_duty));
         }
 

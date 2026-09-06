@@ -4,11 +4,11 @@
 #include "driver/uart.h"
 #include <stdbool.h>
 
-// Inizializza la UART verso il modulo GPS. Ritorna true se ok.
+// Initializes the UART to the GPS module. Returns true if successful.
 bool init_gps(uart_port_t uart_num, int tx_pin, int rx_pin, int baud_rate);
 
-// Legge l'ultima posizione dal modulo GPS (lat/lon in gradi decimali).
-// Ritorna true solo se è stato ricevuto un fix valido.
+// Reads the last position from the GPS module (lat/lon in decimal degrees).
+// Returns true only if a valid fix has been received.
 bool read_gps(float *lat, float *lon);
 
 #endif

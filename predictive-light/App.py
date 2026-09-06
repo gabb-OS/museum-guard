@@ -1,28 +1,14 @@
 """
-Predictive Light Service.
-Microservizio FastAPI che espone GET /predict (ritorna {"brightness": <float>})
-e GET /health.
+Predictive Light Service (FastAPI).
+Exposes GET /predict (returns {"brightness": <float>}) and GET /health.
 
-Design "refit-once-serve-many":
-- Ogni PREDICT_INTERVAL_S secondi (default 60s) il servizio rifitta ARIMA su
-  una finestra storica rolling di ambient_light e genera in un colpo solo
-  un array di previsioni future, una ogni FORECAST_STEP_S secondi (default 1s),
-  fino a coprire l'intervallo prima del prossimo refit.
-- Questo array (forecast_cache) resta in memoria. GET /predict NON rifà mai
-  un fit: calcola solo quanto tempo è passato dall'ultimo refit e restituisce
-  il punto della cache più vicino a "adesso", incrementando quindi l'indice
-  ad ogni chiamata senza costo di calcolo aggiuntivo.
-- La bias correction (EMA sugli errori passati) e la riconciliazione con il
-  valore reale continuano a lavorare su un singolo punto per ciclo di refit,
-  preso a PREDICTION_HORIZON_S secondi di distanza dal fit (measurement:
-  predicted_light / prediction_error), esattamente come prima.
+Design: "refit-once-serve-many"
+- Every PREDICT_INTERVAL_S (default 60s), ARIMA refits on a rolling window of ambient_light and generates a forecast cache (one point every FORECAST_STEP_S).
+- GET /predict never triggers a fit. It reads the closest cached point based on elapsed time.
+- Bias correction (EMA) and reconciliation run on a single point per refit cycle at PREDICTION_HORIZON_S.
 
-Nota: il fit, la bias correction e la riconciliazione dell'errore lavorano
-sempre nello spazio "luce ambientale prevista" (stessa scala di ambient_light,
-comparabile 1:1 nel pannello Grafana dedicato e in predicted_light). Solo il
-valore restituito da GET /predict viene convertito nel target di luminosità
-artificiale del LED (relazione inversa: brightness = 100 - luce_ambientale_prevista),
-perché più luce ambientale c'è meno illuminazione artificiale serve.
+Note: ARIMA fits and bias correction operate in the "predicted ambient light" space. 
+GET /predict converts this to the artificial LED brightness target (100 - predicted ambient light).
 """
 import os
 import time
@@ -49,15 +35,9 @@ INFLUXDB_TOKEN = os.environ.get("INFLUXDB_TOKEN", "")
 INFLUXDB_ORG = os.environ.get("INFLUXDB_ORG", "museumguard")
 INFLUXDB_BUCKET = os.environ.get("INFLUXDB_BUCKET", "museumguard")
 
-# PREDICT_INTERVAL_S ora è l'intervallo di REFIT (non più di ogni singola
-# predizione): ogni quanto viene rifittato ARIMA e rigenerata la cache di
-# previsioni. Alzato a 60s di default proprio perché con "refit-once-serve-many"
-# non serve più rifittare ad ogni chiamata di /predict.
+# Refit interval for ARIMA and forecast cache regeneration. Default 60s.
 PREDICT_INTERVAL_S = int(os.environ.get("PREDICT_INTERVAL_S", "60"))
-# Granularità delle previsioni servite dalla cache (secondi tra un punto e il
-# successivo). Ha senso tenerlo allineato al polling reale di ambient_light
-# (TELEMETRY_POLL_MS nel mashup) così ARIMA prevede alla stessa risoluzione
-# con cui riceve i dati storici.
+# Forecast cache granularity (seconds). Aligned with ambient_light telemetry polling resolution.
 FORECAST_STEP_S = int(os.environ.get("FORECAST_STEP_S", "1"))
 PREDICTION_HORIZON_S = int(os.environ.get("PREDICTION_HORIZON_S", "30"))
 HISTORY_WINDOW_S = int(os.environ.get("HISTORY_WINDOW_S", "600"))
@@ -69,16 +49,14 @@ influx = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG
 write_api = influx.write_api(write_options=SYNCHRONOUS)
 query_api = influx.query_api()
 
-# Stesso tag di default usato lato mashup (influxService.js: useDefaultTags),
-# cosi' predicted_light/prediction_error sono coerenti col resto dei punti
-# scritti nel bucket.
+# Default tag matching mashup (influxService.js) for consistency.
 DEFAULT_TAGS = {"system": "museumguard"}
 
 # Track reconciled targets to avoid updating EMA multiple times for the same prediction
 reconciled_targets: set[str] = set()
 
 def load_reconciled_targets() -> set[str]:
-    """Carica i target già riconciliati da InfluxDB per evitare duplicati al riavvio."""
+    """Load already reconciled targets from InfluxDB to avoid duplicates on restart."""
     flux = f"""
     from(bucket: "{INFLUXDB_BUCKET}")
       |> range(start: -{HISTORY_WINDOW_S}s)
@@ -97,7 +75,7 @@ def load_reconciled_targets() -> set[str]:
     return targets
 
 def read_ambient_light(window_s: int) -> list[tuple[datetime, float]]:
-    """Legge gli ultimi window_s secondi di ambient_light da InfluxDB."""
+    """Read the last window_s seconds of ambient_light from InfluxDB."""
     since = datetime.now(timezone.utc) - timedelta(seconds=window_s)
     flux = f"""
     from(bucket: "{INFLUXDB_BUCKET}")
@@ -118,11 +96,10 @@ def read_ambient_light(window_s: int) -> list[tuple[datetime, float]]:
     return series
 
 def read_unreconciled_predictions() -> list[dict]:
-    """Legge le predizioni non ancora riconciliate (target_timestamp <= now)."""
+    """Read unreconciled predictions (target_timestamp <= now)."""
     now = datetime.now(timezone.utc)
     
-    # FIX: InfluxDB stores fields in separate rows. We must use pivot() to combine 
-    # predicted_value, target_timestamp, and horizon_s into a single record.
+    # InfluxDB stores fields in separate rows. pivot() combines predicted_value, target_timestamp, and horizon_s.
     flux = f"""
     from(bucket: "{INFLUXDB_BUCKET}")
       |> range(start: -{HISTORY_WINDOW_S}s)
@@ -162,7 +139,7 @@ def read_unreconciled_predictions() -> list[dict]:
     return preds
 
 def read_actual_at(target_ts: datetime, tolerance_s: int = 15) -> float | None:
-    """Legge il valore reale di ambient_light più vicino a target_ts (±tolerance_s)."""
+    """Read the actual ambient_light value closest to target_ts (±tolerance_s)."""
     t0 = target_ts - timedelta(seconds=tolerance_s)
     t1 = target_ts + timedelta(seconds=tolerance_s)
     flux = f"""
@@ -206,23 +183,19 @@ def write_prediction_error(predicted_value: float, actual_value: float, target_t
 # ----------------------------- Model ----------------------------------
 class Predictor:
     """
-    ARIMA con bias correction adattiva (EMA sull'errore) e cache di previsioni.
-
-    Ad ogni fit() viene generato un array di previsioni future (forecast_cache),
-    una ogni FORECAST_STEP_S secondi, che copre l'intervallo fino al prossimo
-    refit. current_ambient_forecast() legge da questa cache in base al tempo
-    trascorso, senza mai richiamare ARIMA.
+    ARIMA with adaptive bias correction (EMA) and forecast cache.
+    fit() generates a forecast cache covering the interval until the next refit.
+    current_ambient_forecast() reads from this cache based on elapsed time, without calling ARIMA.
     """
     def __init__(self):
-        # forecast_cache: lista di (target_ts, valore_ambientale_corretto),
-        # ordinata per tempo crescente, generata all'ultimo fit.
+        # forecast_cache: list of (target_ts, corrected_ambient_value), ordered by time.
         self.forecast_cache: list[tuple[datetime, float]] = []
         self.cache_fit_ts: datetime | None = None
 
-        self.last_ambient_forecast: float | None = None  # ultimo valore servito (% luce ambientale)
-        self.last_brightness: float | None = None          # ultimo valore servito, convertito in target LED
+        self.last_ambient_forecast: float | None = None  # Last served value (% ambient light)
+        self.last_brightness: float | None = None        # Last served value, converted to LED target
         self.last_order: tuple | None = None
-        self.ema_error: float = 0.0  # bias corrente
+        self.ema_error: float = 0.0  # Current bias
         self.last_fit_ts: datetime | None = None
 
     def update_bias(self, new_error: float):
@@ -231,13 +204,9 @@ class Predictor:
 
     def fit(self, series: list[tuple[datetime, float]]) -> tuple[float, datetime] | None:
         """
-        Rifitta ARIMA e ricostruisce forecast_cache con una previsione ogni
-        FORECAST_STEP_S secondi, fino a coprire PREDICT_INTERVAL_S secondi
-        (l'intervallo prima del prossimo refit).
-
-        Ritorna (predicted_value, target_ts) del punto più vicino a
-        PREDICTION_HORIZON_S secondi nel futuro, da usare per la
-        riconciliazione/bias come prima. None se il fit non è possibile.
+        Refits ARIMA and rebuilds forecast_cache with one prediction every FORECAST_STEP_S.
+        Returns (predicted_value, target_ts) closest to PREDICTION_HORIZON_S for reconciliation.
+        Returns None if fit fails.
         """
         if len(series) < MIN_SAMPLES_TO_FIT:
             logger.info("Not enough samples yet (%d/%d)", len(series), MIN_SAMPLES_TO_FIT)
@@ -245,7 +214,7 @@ class Predictor:
 
         values = np.array([v for _, v in series], dtype=float)
 
-        # Refit ARIMA su finestra rolling (adattamento al trend corrente)
+        # Refit ARIMA on rolling window to adapt to current trend
         try:
             model = pm.auto_arima(
                 values,
@@ -259,14 +228,11 @@ class Predictor:
             logger.error("ARIMA fit failed: %s", exc)
             return None
 
-        # Stima del passo temporale medio della serie storica (secondi):
-        # ARIMA produce forecast alla stessa spaziatura dei dati in input,
-        # quindi idealmente dt ≈ FORECAST_STEP_S (allinea il polling di
-        # ambient_light a FORECAST_STEP_S per avere previsioni pulite).
+        # Estimate average time step of historical series (seconds). ARIMA forecasts at the same spacing as input data.
         times = [t.timestamp() for t, _ in series]
         dt = (times[-1] - times[0]) / max(1, len(times) - 1)
 
-        # Quanti passi servono per coprire l'intervallo fino al prossimo refit
+        # Steps needed to cover the interval until the next refit
         steps_needed = max(1, int(math.ceil(PREDICT_INTERVAL_S / max(dt, 1e-3))))
 
         try:
@@ -277,10 +243,7 @@ class Predictor:
 
         fit_ts = datetime.now(timezone.utc)
 
-        # Ricostruisce la cache: un punto ogni FORECAST_STEP_S secondi.
-        # forecast[i] corrisponde a "dt*(i+1)" secondi nel futuro rispetto al
-        # fit; qui la ricampioniamo sulla griglia regolare FORECAST_STEP_S
-        # prendendo, per ogni step della griglia, il punto forecast più vicino.
+        # Rebuild cache: one point every FORECAST_STEP_S seconds, resampled to the regular grid.
         new_cache: list[tuple[datetime, float]] = []
         n_grid_points = max(1, int(math.ceil(PREDICT_INTERVAL_S / FORECAST_STEP_S)))
         for g in range(1, n_grid_points + 1):
@@ -296,8 +259,7 @@ class Predictor:
         self.last_order = tuple(model.order)
         self.last_fit_ts = fit_ts
 
-        # Punto di riferimento per la riconciliazione/bias, come prima:
-        # quello più vicino a PREDICTION_HORIZON_S secondi nel futuro.
+        # Reference point for reconciliation/bias: closest to PREDICTION_HORIZON_S in the future.
         horizon_ts, horizon_value = min(
             new_cache, key=lambda item: abs((item[0] - fit_ts).total_seconds() - PREDICTION_HORIZON_S)
         )
@@ -311,10 +273,8 @@ class Predictor:
 
     def current_ambient_forecast(self) -> float | None:
         """
-        Restituisce il punto della cache più vicino ad "adesso", senza mai
-        richiamare ARIMA. Se la cache è vuota (nessun fit ancora riuscito)
-        ritorna None. Se "adesso" è oltre l'ultimo punto cachato (refit in
-        ritardo), resta agganciato all'ultimo valore disponibile.
+        Returns the cached point closest to "now" without calling ARIMA. 
+        Returns None if cache is empty. Clamps to the last value if "now" exceeds the cache.
         """
         if not self.forecast_cache or self.cache_fit_ts is None:
             return None
@@ -322,7 +282,7 @@ class Predictor:
         now = datetime.now(timezone.utc)
         elapsed = (now - self.cache_fit_ts).total_seconds()
 
-        # Indice sulla griglia regolare FORECAST_STEP_S, clampato ai bordi
+        # Index on the regular FORECAST_STEP_S grid, clamped to bounds
         idx = int(round(elapsed / FORECAST_STEP_S)) - 1
         idx = max(0, min(len(self.forecast_cache) - 1, idx))
 
@@ -336,27 +296,27 @@ predictor = Predictor()
 
 # ----------------------------- Background loop ------------------------
 async def predict_loop():
-    """Job periodico: riconcilia previsioni scadute + rifitta ARIMA."""
-    # Piccolo delay iniziale per lasciare il tempo a InfluxDB di raccogliere dati
+    """Periodic job: reconcile expired predictions + refit ARIMA."""
+    # Initial delay to allow InfluxDB to collect data
     await asyncio.sleep(5)
     
-    # Carica i target già riconciliati per evitare di ricalcolare l'EMA su errori vecchi
+    # Load already reconciled targets to avoid recalculating EMA on old errors
     global reconciled_targets
     reconciled_targets.update(load_reconciled_targets())
     logger.info("Loaded %d already reconciled targets.", len(reconciled_targets))
     
     while True:
         try:
-            # 1) Riconciliazione: previsioni scadute → errore → aggiorna EMA
+            # 1) Reconciliation: expired predictions -> error -> update EMA
             preds = read_unreconciled_predictions()
             for p in preds:
                 ts_key = p["target_timestamp"].isoformat()
                 if ts_key in reconciled_targets:
-                    continue  # Già riconciliata in questa esecuzione o in precedenza
+                    continue  # Already reconciled
                 
                 actual = read_actual_at(p["target_timestamp"])
                 if actual is None:
-                    continue  # dato reale non ancora arrivato, riproveremo
+                    continue  # Actual data not yet available, will retry
                 
                 err = actual - p["predicted_value"]
                 predictor.update_bias(err)
@@ -368,9 +328,8 @@ async def predict_loop():
                     p["target_timestamp"].isoformat(), p["predicted_value"], actual, err, predictor.ema_error,
                 )
             
-            # 2) Refit: rigenera l'intera cache di previsioni in un colpo solo.
-            #    GET /predict, nel frattempo, continua a servire dalla cache
-            #    esistente senza mai bloccarsi in attesa di questo fit.
+            # 2) Refit: regenerates the entire forecast cache at once. 
+            # GET /predict continues serving from the existing cache without blocking.
             series = read_ambient_light(HISTORY_WINDOW_S)
             result = predictor.fit(series)
             if result is not None:
@@ -400,12 +359,10 @@ app = FastAPI(title="Predictive Light Service", lifespan=lifespan)
 
 @app.get("/predict")
 async def predict():
-    # Nessun fit qui dentro: legge solo il punto di cache corrispondente ad
-    # "adesso", popolata dall'ultimo refit periodico in predict_loop().
+    # No fit here: reads the cached point corresponding to "now", populated by the last periodic refit.
     ambient_forecast = predictor.current_ambient_forecast()
     if ambient_forecast is None:
-        # A freddo, prima che il loop abbia fatto un fit: 503 così il
-        # mashup usa il fallback reattivo (computeTargetBrightness).
+        # Cold start (before first fit): returns 503 so the mashup uses the reactive fallback.
         from fastapi.responses import JSONResponse
         return JSONResponse(
             status_code=503,

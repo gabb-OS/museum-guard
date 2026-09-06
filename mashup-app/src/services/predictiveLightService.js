@@ -1,14 +1,10 @@
 /*
-Adapter verso il servizio predictive-light (container Python/FastAPI a
-parte, vedi predictive-light/). Non fa MAI il calcolo lui stesso: si
-limita a chiedere al servizio l'ultima previsione gia' pronta.
+Adapter for the external predictive-light service (Python/FastAPI).
+Does not calculate brightness itself; just fetches the latest prediction.
 
-Se la chiamata fallisce (servizio giu', timeout, nessuna previsione
-ancora disponibile allo startup a freddo -> 503) lancia un errore e
-lascia che sia telemetryPoller.js a decidere il fallback reattivo.
-Questo e' il punto chiave del design: un solo posto (telemetryPoller)
-decide quale valore va effettivamente su regulateBrightness, questo
-modulo si limita a "chiedere" al predittivo.
+Throws an error if the request fails (service down, timeout, cold start 503),
+letting telemetryPoller.js handle the reactive fallback.
+Ensures a single source of truth for the actual brightness value.
 */
 
 import { config } from "../config.js";
@@ -25,12 +21,12 @@ export async function getPredictedBrightness() {
         });
 
         if (!res.ok) {
-            throw new Error(`predictive-light ha risposto ${res.status}`);
+            throw new Error(`predictive-light responded with ${res.status}`);
         }
 
         const body = await res.json();
         if (typeof body.brightness !== "number") {
-            throw new Error("risposta predictive-light senza campo 'brightness' valido");
+            throw new Error("predictive-light response missing valid 'brightness' field");
         }
 
         return body.brightness;

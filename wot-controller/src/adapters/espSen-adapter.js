@@ -65,8 +65,8 @@ export async function setTheftThreshold(value) {
     }
 }
 
-// PUT /reset_alarm: ricalibra la baseline e ferma il tracking GPS
-// (gia' esposto sia dal firmware reale che dal mock Python).
+// PUT /reset_alarm: Recalibrate the baseline and stop GPS tracking
+// (already exposed by both the real firmware and the Python mock).
 export async function resetTracking() {
     try {
         const res = await client.put("/reset_alarm");

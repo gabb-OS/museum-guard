@@ -105,9 +105,9 @@ export async function createEspSenTD(WoT) {
 
     subscribeToAlarmEvents(
         (evt) => {
-            // Il mock puo' accumulare piu' eventi tra una notifica CoAP e
-            // l'altra e inviarli come array: lo schema TD di alarmEvent si
-            // aspetta pero' un oggetto singolo, quindi li emettiamo uno a uno.
+            // The mock can accumulate multiple events between one CoAP notification and
+            // the next and send them as an array: the alarmEvent TD pattern
+            // however, expects a single object, so we emit them one by one.
             const events = Array.isArray(evt) ? evt : [evt];
             events.forEach((e) => espSenThing.emitEvent("alarmEvent", e));
         },

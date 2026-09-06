@@ -5,62 +5,62 @@ import logging
 import time
 from aiocoap import resource, Context, Message
 
-# -------------------- Configurazione --------------------
-# Luce come percentuale 0-100, come il firmware reale (ADC mappato in %)
-LIGHT_BASE = 40.0            # % di base
-LIGHT_NOISE = 2.0            # variazione casuale
+# -------------------- Configuration --------------------
+# Light as 0-100%, matching the real firmware (ADC mapped to %)
+LIGHT_BASE = 40.0            # Base percentage
+LIGHT_NOISE = 2.0            # Random variation
 
-ACCEL_SAMPLE_RATE = 0.01     # 100 Hz (come vTaskDelay(10ms) nel firmware)
-LIGHT_SAMPLE_RATE = 1.0      # come vTaskDelay(1000ms) nel firmware
+ACCEL_SAMPLE_RATE = 0.01     # 100 Hz (matches vTaskDelay(10ms) in firmware)
+LIGHT_SAMPLE_RATE = 1.0      # Matches vTaskDelay(1000ms) in firmware
 
-# Soglie di default (allineate a main.c)
-impact_threshold = 0.4        # g, differenza tra campioni successivi su Z
-theft_threshold = 0.25        # g, scostamento dalla baseline su X (asse verticale reale)
+# Default thresholds 
+impact_threshold = 0.4        # g, difference between consecutive Z samples
+theft_threshold = 0.25        # g, deviation from baseline on X (actual vertical axis)
 THRESHOLD_MIN = 0.05
 THRESHOLD_MAX = 5.00
 
-THEFT_CONFIRM_SAMPLES = 6     # persistenza richiesta per confermare (come firmware)
+THEFT_CONFIRM_SAMPLES = 6     # Persistence required for confirmation (matches firmware)
 THEFT_COOLDOWN_S = 3.0
 
-# GPS: come GPS_PING_INTERVAL_MS in main.c (5000ms). Punto base + piccolo
-# random walk per simulare lo spostamento dell'opera una volta rubata.
+# GPS: matches GPS_PING_INTERVAL_MS in main.c (5000ms). Base point + small
+# random walk to simulate artwork displacement once stolen.
 GPS_PING_INTERVAL_S = 5.0
-GPS_BASE_LAT = 45.4642    # Milano, giusto per avere coordinate plausibili
+GPS_BASE_LAT = 45.4642        # Milan, provides plausible coordinates
 GPS_BASE_LON = 9.1900
-GPS_WALK_STEP = 0.0005    # ~50m per ping, cosi' il tracking si vede muoversi
+GPS_WALK_STEP = 0.0005        # ~50m per ping, so tracking movement is visible
 
-# -------------------- Stato condiviso --------------------
+# -------------------- Shared State --------------------
 light_percent = LIGHT_BASE
 
-# Il sensore e' montato DI TAGLIO: la gravita' cade sull'asse X (non Z).
-# A riposo: ax ~ 1.0g, ay ~ 0, az ~ 0 (allineato a main.c)
-ax, ay, az = 1.0, 0.0, 0.0          # ultimo campione grezzo
+# Sensor is mounted sideways: gravity falls on the X axis
+# At rest: ax ~ 1.0g, ay ~ 0, az ~ 0 
+ax, ay, az = 1.0, 0.0, 0.0          # Latest raw sample
 last_ax, last_ay, last_az = 1.0, 0.0, 0.0
 sum_ax = sum_ay = sum_az = 0.0
 sample_count = 0
-avg_ax = avg_ay = avg_az = 0.0      # esposto su /accel, come g_avg_* nel firmware
+avg_ax = avg_ay = avg_az = 0.0      # Exposed on /accel, like g_avg_* in firmware
 
-baseline_ax = 1.0                   # asse verticale reale (gravita' su X)
+baseline_ax = 1.0                   # Actual vertical axis
 theft_counter = 0
 last_theft_trigger = 0.0
 
-# Stato tracking GPS: mirror di g_tracking_active nel firmware. Diventa
-# True quando un furto viene confermato, si azzera solo con reset_alarm.
+# GPS tracking state: mirrors g_tracking_active in firmware. Becomes
+# True when theft is confirmed, resets only via reset_alarm.
 tracking_active = False
 
 tracking_lock = asyncio.Lock()
 gps_lat, gps_lon = GPS_BASE_LAT, GPS_BASE_LON
 
 light_lock = asyncio.Lock()
-accel_lock = asyncio.Lock()          # protegge ax/ay/az correnti E avg_*
+accel_lock = asyncio.Lock()          # Protects current ax/ay/az AND avg_*
 threshold_lock = asyncio.Lock()
 event_lock = asyncio.Lock()
 event_queue = asyncio.Queue(maxsize=20)
 
-# Riferimento globale alla risorsa CoAP osservabile /events, impostato in main()
-# prima dell'avvio dei task. Serve a inoltrare le notifiche Observe (RFC 7641)
-# ogni volta che push_event() aggiunge un nuovo evento, cosi' i client che
-# fanno GET con observe=true ricevono il push in tempo reale.
+# Global reference to the observable CoAP /events resource, set in main()
+# before tasks start. Used to forward Observe notifications (RFC 7641)
+# whenever push_event() adds a new event, so clients that
+# do GET with observe=true receive real-time pushes.
 _event_resource_ref = None
 
 logging.basicConfig(level=logging.INFO)
@@ -75,12 +75,12 @@ async def push_event(ev: dict):
             _ = event_queue.get_nowait()
             event_queue.put_nowait(ev)
 
-    # Notifica gli observer CoAP registrati su /events
+    # Notify CoAP observers registered on /events
     if _event_resource_ref is not None:
         _event_resource_ref.updated_state()
 
 
-# -------------------- Simulatore luce --------------------
+# -------------------- Light Simulator --------------------
 async def light_task():
     global light_percent
     while True:
@@ -90,10 +90,10 @@ async def light_task():
         await asyncio.sleep(LIGHT_SAMPLE_RATE)
 
 
-# -------------------- Simulatore + rilevazione accelerometro --------------------
-# Allineato a read_accelerometer_sensor() in main.c:
-# - IMPACT  su Z (diff_z)  -> asse trasversale/longitudinale
-# - THEFT   su X (ax - baseline_ax) -> asse verticale reale (gravita')
+# -------------------- Accelerometer Simulator + Detection --------------------
+# Aligned with read_accelerometer_sensor() in main.c:
+# - IMPACT on Z (diff_z) -> transverse/longitudinal axis
+# - THEFT on X (ax - baseline_ax) -> actual vertical axis (gravity)
 async def accelerometer_task():
     global ax, ay, az, last_ax, last_ay, last_az
     global sum_ax, sum_ay, sum_az, sample_count
@@ -101,33 +101,33 @@ async def accelerometer_task():
     global tracking_active
 
     while True:
-        # Vibrazioni normali attorno al riposo (gravita' su X)
+        # Normal vibrations around rest (gravity on X)
         new_ax = 1.0 + random.gauss(0, 0.02)
         new_ay = random.gauss(0, 0.05)
         new_az = random.gauss(0, 0.05)
 
-        # Ogni tanto inietta un impatto: picco isolato su Z (0.5% per campione)
+        # Occasionally inject an impact: isolated peak on Z (0.5% per sample)
         if random.random() < 0.005:
             new_az += random.uniform(0.6, 1.5) * random.choice([1, -1])
-            logger.info("Simulazione impatto (picco su Z)")
+            logger.info("Simulating impact (peak on Z)")
 
-        # Ogni tanto inietta un furto: scostamento sostenuto su X (asse verticale),
-        # abbastanza lungo da superare THEFT_CONFIRM_SAMPLES campioni consecutivi
+        # Occasionally inject a theft: sustained deviation on X (vertical axis),
+        # long enough to exceed THEFT_CONFIRM_SAMPLES consecutive samples
         theft_injection_samples = 0
         if random.random() < 0.0005:
             theft_injection_samples = THEFT_CONFIRM_SAMPLES + 4
-            logger.info("Simulazione furto (asse X spostato, iniezione sostenuta)")
+            logger.info("Simulating theft (X axis shifted, sustained injection)")
 
         async with accel_lock:
             last_ax, last_ay, last_az = ax, ay, az
             ax, ay, az = new_ax, new_ay, new_az
-            diff_z = az - last_az   # backward difference su Z per impact
+            diff_z = az - last_az   # Backward difference on Z for impact
             sum_ax += ax
             sum_ay += ay
             sum_az += az
             sample_count += 1
 
-        # --- Rilevamento impatto su Z (fuori dal lock, come nel firmware) ---
+        # --- Z impact detection (outside lock, like in firmware) ---
         async with threshold_lock:
             impact_th = impact_threshold
             theft_th = theft_threshold
@@ -137,10 +137,10 @@ async def accelerometer_task():
             await push_event(ev)
             logger.warning(f"IMPACT DETECTED: diff_z={diff_z:.3f} > {impact_th}")
 
-        # --- Rilevamento furto su X: baseline + contatore con isteresi ---
+        # --- X theft detection: baseline + counter with hysteresis ---
         if theft_injection_samples > 0:
             for _ in range(theft_injection_samples):
-                injected_ax = 1.0 - random.uniform(0.5, 0.9)  # x molto basso (oggetto spostato dalla verticale)
+                injected_ax = 1.0 - random.uniform(0.5, 0.9)  # x very low (object moved from vertical)
                 displacement = injected_ax - baseline_ax
                 if abs(displacement) > theft_th:
                     theft_counter = min(theft_counter + 2, 50)
@@ -179,7 +179,7 @@ async def accelerometer_task():
         await asyncio.sleep(ACCEL_SAMPLE_RATE)
 
 
-# -------------------- Media 250ms (come accel_avg_task in main.c) --------------------
+# -------------------- 250ms Average (like accel_avg_task in main.c) --------------------
 async def accel_avg_task():
     global sum_ax, sum_ay, sum_az, sample_count, avg_ax, avg_ay, avg_az
     while True:
@@ -190,11 +190,11 @@ async def accel_avg_task():
                 avg_az = sum_az / sample_count
                 sum_ax = sum_ay = sum_az = 0.0
                 sample_count = 0
-        # Ridotto a 250ms come nel firmware
+        # Reduced to 250ms as in firmware
         await asyncio.sleep(0.25)
 
 
-# -------------------- GPS tracking (come gps_ping_task in main.c) --------------------
+# -------------------- GPS Tracking (like gps_ping_task in main.c) --------------------
 async def gps_task():
     global gps_lat, gps_lon
     while True:
@@ -204,7 +204,7 @@ async def gps_task():
             async with tracking_lock:
                 gps_lat += random.uniform(-GPS_WALK_STEP, GPS_WALK_STEP)
                 gps_lon += random.uniform(-GPS_WALK_STEP, GPS_WALK_STEP)
-            logger.info(f"Fix GPS: lat={gps_lat:.6f} lon={gps_lon:.6f}")
+            logger.info(f"GPS Fix: lat={gps_lat:.6f} lon={gps_lon:.6f}")
             ev = {"type": "position", "lat": round(gps_lat, 6), "lon": round(gps_lon, 6)}
             await push_event(ev)
             await asyncio.sleep(GPS_PING_INTERVAL_S)
@@ -212,7 +212,7 @@ async def gps_task():
             await asyncio.sleep(2.0)  # GPS_WARMUP_INTERVAL_MS
 
 
-# -------------------- Server CoAP --------------------
+# -------------------- CoAP Server --------------------
 class LightResource(resource.Resource):
     async def render_get(self, request):
         async with light_lock:
@@ -221,7 +221,7 @@ class LightResource(resource.Resource):
 
 
 class AccelResource(resource.Resource):
-    """Espone la media, come /accel nel firmware reale."""
+    """Expose the average, like /accel in the real firmware."""
     async def render_get(self, request):
         async with accel_lock:
             data = {"ax": round(avg_ax, 3), "ay": round(avg_ay, 3), "az": round(avg_az, 3)}
@@ -230,8 +230,8 @@ class AccelResource(resource.Resource):
 
 
 class EventResource(resource.ObservableResource):
-    """Restituisce UN evento per volta dalla coda (FIFO).
-    Eredita da ObservableResource per supportare Observe (RFC 7641)."""
+    """Return ONE event at a time from the queue (FIFO).
+    Inherits from ObservableResource to support Observe (RFC 7641)."""
     async def render_get(self, request):
         event = None
         async with event_lock:
@@ -245,7 +245,7 @@ class EventResource(resource.ObservableResource):
 
 
 class ThresholdsResource(resource.Resource):
-    """GET /thresholds: entrambe le soglie insieme."""
+    """GET /thresholds: both thresholds together."""
     async def render_get(self, request):
         async with threshold_lock:
             data = {"impact": impact_threshold, "theft_displacement": theft_threshold}
@@ -253,7 +253,7 @@ class ThresholdsResource(resource.Resource):
 
 
 class ImpactThresholdResource(resource.Resource):
-    """PUT /thresholds/impact: payload plain text, un solo float."""
+    """PUT /thresholds/impact: plain text payload, a single float."""
     async def render_put(self, request):
         global impact_threshold
         try:
@@ -264,12 +264,12 @@ class ImpactThresholdResource(resource.Resource):
             return Message(code=128)
         async with threshold_lock:
             impact_threshold = value
-        logger.info(f"impact_threshold aggiornata: {value}")
+        logger.info(f"impact_threshold updated: {value}")
         return Message(code=68)  # 2.04 Changed
 
 
 class TheftThresholdResource(resource.Resource):
-    """PUT /thresholds/theft: payload plain text, un solo float."""
+    """PUT /thresholds/theft: plain text payload, a single float."""
     async def render_put(self, request):
         global theft_threshold
         try:
@@ -280,13 +280,13 @@ class TheftThresholdResource(resource.Resource):
             return Message(code=128)
         async with threshold_lock:
             theft_threshold = value
-        logger.info(f"theft_threshold aggiornata: {value}")
+        logger.info(f"theft_threshold updated: {value}")
         return Message(code=68)  # 2.04 Changed
 
 
 class ResetAlarmResource(resource.Resource):
-    """PUT /reset_alarm: ricalibra la baseline sull'ultima media X e ferma
-    il tracking GPS, come hnd_put_reset_alarm nel firmware reale."""
+    """PUT /reset_alarm: recalibrate baseline to the latest X average and stop
+    GPS tracking, like hnd_put_reset_alarm in the real firmware."""
     async def render_put(self, request):
         global baseline_ax, theft_counter, tracking_active
         async with accel_lock:
@@ -295,7 +295,7 @@ class ResetAlarmResource(resource.Resource):
             baseline_ax = current_ax
         async with tracking_lock:
             tracking_active = False
-        logger.info(f"Reset alarm: baseline_ax ricalibrata a {baseline_ax:.3f}, tracking disattivato")
+        logger.info(f"Reset alarm: baseline_ax recalibrated to {baseline_ax:.3f}, tracking disabled")
         return Message(code=68)  # 2.04 Changed
 
 
@@ -305,13 +305,13 @@ async def main():
     events_resource = EventResource()
     _event_resource_ref = events_resource
 
-    # Avvio task di simulazione
+    # Start simulation tasks
     asyncio.create_task(light_task())
     asyncio.create_task(accelerometer_task())
     asyncio.create_task(accel_avg_task())
     asyncio.create_task(gps_task())
 
-    # Server CoAP
+    # CoAP Server
     root = resource.Site()
     root.add_resource(['light'], LightResource())
     root.add_resource(['accel'], AccelResource())

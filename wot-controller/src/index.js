@@ -14,9 +14,7 @@ async function main() {
     const WoT = await servient.start();
     console.log("Servient WoT started");
 
-    // Produzione dei due Thing: da qui in poi sono raggiungibili
-    // via HTTP a http://node-wot:8080/sensor e /actuator
-    
+    // Produce the two Things: reachable via HTTP at http://node-wot:8080/sensor and /actuator
     const espSenThing = await createEspSenTD(WoT);
     const espActThing = await createEspActTD(WoT);
 
@@ -25,6 +23,6 @@ async function main() {
 }
 
 main().catch(err => {
-    console.error("Errore fatale nel Controller:", err);
+    console.error("Fatal error in Controller:", err);
     process.exit(1);
 });

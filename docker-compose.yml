@@ -89,8 +89,8 @@ services:
       - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
       - INFLUXDB_ORG=${INFLUXDB_ORG}
       - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
-      # Con USE_MOCKS=true (vedi .env) questi puntano ai container mock,
-      # con USE_MOCKS=false li imposti agli IP reali dell'ESP32 sulla LAN.
+      # With USE_MOCKS=true (see .env) these point to the mock containers,
+      # with USE_MOCKS=false you set them to the real IPs of the ESP32 on the LAN.
       - ESP_SEN_ADDRESS=${ESP_SEN_ADDRESS}
       - ESP_ACT_ADDRESS=${ESP_ACT_ADDRESS}
       - COAP_PORT=${COAP_PORT}
@@ -99,17 +99,17 @@ services:
       - influxdb
     restart: unless-stopped
 
-  # --- Mock: partono SOLO con `docker compose --profile mock up` ---
-  # Utili quando lavori senza hardware fisico collegato (es. i due PC
-  # separati: uno fa girare i mock, l'altro il solo node-wot puntato
-  # sull'ESP reale).
+# --- Mocks: ONLY start with `docker compose --profile mock up` ---
+# Useful when you're working without physical hardware connected (e.g., two separate PCs
+#: one runs the mocks, the other just runs node-wot pointed
+# at the real ESP).
   esp-sen-mock:
-    # "mock" = alias comodo per "tutti i mock insieme"; "mock-sen" = solo questo
+    # "mock" = convenient alias for "all mocks together"; "mock-sen" = just this one
     profiles: ["mock", "mock-sen"]
     build: ./esp/esp-sen/mockup
     container_name: museumguard-sen-mock
-    # ports:
-    #   - "5683:5683/udp"   # scommenta solo per test manuali dall'host
+  # ports:
+  # - "5683:5683/udp" # Uncomment only for manual testing from the host
     restart: unless-stopped
 
   esp-act-mock:
@@ -117,7 +117,7 @@ services:
     build: ./esp/esp-act/mockup
     container_name: museumguard-act-mock
     ports:
-      - "8081:80"   # per test manuale dall'host (opzionale)
+      - "8081:80" # for manual testing from the host (optional)
     restart: unless-stopped
 
 volumes:

@@ -27,11 +27,11 @@
 #define GPS_PING_INTERVAL_MS 5000
 #define GPS_WARMUP_INTERVAL_MS 2000  
 
-// stato di allarme globale
+// global alert state
 static bool g_tracking_active = false;
 static SemaphoreHandle_t g_tracking_mutex;
 
-// mutex dedicato allo stato del rilevamento furto (baseline + counter)
+// mutex dedicated to the theft detection state (baseline + counter)
 static SemaphoreHandle_t g_theft_mutex;
 
 // photoresistor stuff
@@ -52,7 +52,7 @@ static int sample_count = 0;
 static SemaphoreHandle_t g_accel_mutex;
 static float g_avg_ax = 0, g_avg_ay = 0, g_avg_az = 0; 
 
-// soglie configurabili a runtime
+// runtime configurable thresholds
 static float g_impact_threshold = 0.4f;
 static float g_theft_displacement_threshold = 0.25f;
 static SemaphoreHandle_t g_threshold_mutex;
@@ -84,7 +84,6 @@ void read_light_sensor(void *pvParameters) {
         g_light_percent = percent;
         xSemaphoreGive(g_light_mutex);
         
-        // Stampa deploy: luce e stato ogni 1 secondo
         xSemaphoreTake(g_tracking_mutex, portMAX_DELAY);
         bool is_tracking = g_tracking_active;
         xSemaphoreGive(g_tracking_mutex);
@@ -110,13 +109,7 @@ void read_accelerometer_sensor(void *pvParameters) {
     
     while (1) {
         if (read_accel(&ax, &ay, &az)) {
-            diff_x = ax - last_ax;
-            diff_y = ay - last_ay;
             diff_z = az - last_az;
-            
-            // Sopprime i warning di variabile inutilizzata (utile se in futuro vorrai usarle)
-            (void)diff_x;
-            (void)diff_y;
 
             // --- IMPACT ---
             xSemaphoreTake(g_threshold_mutex, portMAX_DELAY);
@@ -197,7 +190,7 @@ void accel_avg_task(void *pvParameters) {
         sample_count = 0;
         xSemaphoreGive(g_accel_mutex);
         
-        // Stampa l'accelerazione media ogni 1 secondo (4 cicli da 250ms)
+        // Print the average acceleration every 1 second (4 cycles of 250ms)
         print_counter++;
         if (print_counter >= 4) {
             ESP_LOGI("ACCEL", "Media: ax=%.3f ay=%.3f az=%.3f", g_avg_ax, g_avg_ay, g_avg_az);
@@ -208,7 +201,7 @@ void accel_avg_task(void *pvParameters) {
     }
 }
 
-// --- GPS TASK AGGIORNATA CON LOGGING INTELLIGENTE E PRECISO ---
+// --- GPS TASK  ---
 void gps_ping_task(void *pvParameters) {
     bool last_tracking = false;
     bool last_has_fix = false;
@@ -217,13 +210,13 @@ void gps_ping_task(void *pvParameters) {
     ESP_LOGI("GPS", "Task avviata. Modulo GPS in riscaldamento (warmup)...");
 
     while (1) {
-        // 1. Controlla lo stato del tracking
+        // 1. Check tracking status
         bool tracking;
         xSemaphoreTake(g_tracking_mutex, portMAX_DELAY);
         tracking = g_tracking_active;
         xSemaphoreGive(g_tracking_mutex);
 
-        // Logga SOLO quando lo stato di tracking cambia
+        // Log ONLY when tracking status changes
         if (tracking != last_tracking) {
             if (tracking) {
                 ESP_LOGW("GPS", ">>> TRACKING ATTIVATO (Furto rilevato) <<<");
@@ -233,11 +226,11 @@ void gps_ping_task(void *pvParameters) {
             last_tracking = tracking;
         }
 
-        // 2. Leggi il GPS
+        // 2. Read GPS
         float lat = 0.0, lon = 0.0;
         bool has_fix = read_gps(&lat, &lon);
 
-        // 3. Logga SOLO quando lo stato del Fix cambia (evita spam)
+        // 3. Log ONLY when the Fix status changes (avoid spam)
         if (has_fix != last_has_fix) {
             if (has_fix) {
                 ESP_LOGI("GPS", "Fix GPS ACQUISITO con successo!");
@@ -247,10 +240,10 @@ void gps_ping_task(void *pvParameters) {
             last_has_fix = has_fix;
         }
 
-        // 4. Azioni e Logging basati sullo stato combinato
+        // 4. Combined State-Based Actions and Logging
         if (has_fix) {
             if (tracking) {
-                // Stampa le coordinate ESATTE solo se siamo in modalità furto
+                // Print the EXACT coordinates only if we are in theft mode
                 ESP_LOGI("GPS", "Posizione (TRACKING): lat=%.6f, lon=%.6f", lat, lon);
                 char event_buf[64];
                 int elen = snprintf(event_buf, sizeof(event_buf),
@@ -258,12 +251,12 @@ void gps_ping_task(void *pvParameters) {
                 coap_push_event(event_buf, elen);
             }
         } else {
-            // Se siamo in tracking e NON abbiamo il fix, è un errore critico da segnalare
+            // If we are tracking and we do NOT have the fix, it is a critical error to report
             if (tracking) {
                 ESP_LOGE("GPS", "CRITICO: Tracking attivo ma NESSUN FIX GPS disponibile!");
             } else {
-                // In warmup, stampiamo un promemoria ogni 15 tentativi (~30 secondi) 
-                // per confermare che la task non è bloccata, senza fare spam.
+                // In warmup, we print a reminder every 15 attempts (~30 seconds)
+                // to confirm that the task is not blocked, without spamming.
                 warmup_no_fix_counter++;
                 if (warmup_no_fix_counter >= 15) {
                     ESP_LOGI("GPS", "Warmup: ancora in ricerca satelliti... (assicurati di essere all'aperto o vicino a una finestra)");

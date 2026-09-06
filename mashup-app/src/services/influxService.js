@@ -6,14 +6,14 @@ const org = process.env.INFLUXDB_ORG;
 const bucket = process.env.INFLUXDB_BUCKET;
 
 if (!token || !org || !bucket) {
-    console.warn("[influxService] variabili INFLUXDB_TOKEN/ORG/BUCKET mancanti: i punti non verranno scritti.");
+    console.warn("[influxService] Missing INFLUXDB_TOKEN/ORG/BUCKET: points will not be written.");
 }
 
 const writeApi = new InfluxDB({ url, token }).getWriteApi(org, bucket, "ms", {
-    flushInterval: 1000,   // invia ogni 1s invece che ogni 60s
+    flushInterval: 1000,   // Flush every 1s instead of 60s
     writeFailed: (error, lines, attempt) => {
-        console.error(`[influxService] SCRITTURA FALLITA (tentativo ${attempt}):`, error.message);
-        console.error("[influxService] righe scartate:", lines);
+        console.error(`[influxService] WRITE FAILED (attempt ${attempt}):`, error.message);
+        console.error("[influxService] discarded lines:", lines);
     }
 });
 writeApi.useDefaultTags({ system: "museumguard" });
@@ -22,12 +22,12 @@ function safeWrite(point) {
     try {
         writeApi.writePoint(point);
     } catch (err) {
-        console.error("[influxService] errore scrittura:", err.message);
+        console.error("[influxService] write error:", err.message);
     }
 }
 
 /**
- * Scrive un ciclo di telemetria completo: misure sensore + stato attuatore.
+ * Writes a full telemetry cycle: sensor measurements + actuator state.
  * data = { lightSens, accelSens: {ax,ay,az}, alarmState, artworkBrightness }
  */
 export async function writeTelemetry({ lightSens, accelSens, alarmState, artworkBrightness }) {
@@ -40,7 +40,7 @@ export async function writeTelemetry({ lightSens, accelSens, alarmState, artwork
             .floatField("az", accelSens.az)
     );
 
-    // "actuator states" + "lighting control values" richiesti dalla traccia
+    // Actuator states and lighting control values required by specs
     safeWrite(
         new Point("actuator_state")
             .stringField("alarm_state", alarmState)
@@ -49,7 +49,7 @@ export async function writeTelemetry({ lightSens, accelSens, alarmState, artwork
 }
 
 /**
- * Scrive un evento impact/theft ricevuto da alarmEvent.
+ * Writes an impact/theft event.
  */
 export async function writeEvent(event) {
     const measurement = event.type === "theft" ? "theft_event" : "impact_event";
@@ -61,8 +61,7 @@ export async function writeEvent(event) {
 }
 
 /**
- * Scrive le soglie correnti impact/theft, cosi' Grafana puo' mostrarle
- * come stat panel invece di dover interrogare il WoT ad ogni refresh.
+ * Writes current thresholds so Grafana can display them without querying the WoT on every refresh.
  */
 export async function writeThresholds({ impact, theft_displacement }) {
     safeWrite(
@@ -73,11 +72,8 @@ export async function writeThresholds({ impact, theft_displacement }) {
 }
 
 /**
- * Scrive una posizione GPS ricevuta durante il tracking post-furto
- * (evento alarmEvent con type "position", vedi gps_ping_task nel firmware
- * e gps_task nel mock). Measurement dedicata cosi' Grafana puo' mostrare
- * l'ultima posizione nota con un pannello Geomap/Stat separato dagli eventi
- * impact/theft.
+ * Writes GPS position during post-theft tracking. 
+ * Dedicated measurement for Grafana Geomap/Stat panels, separate from impact/theft events.
  */
 export async function writePosition({ lat, lon }) {
     safeWrite(
