@@ -1,14 +1,12 @@
 """
 Predictive Light Service (FastAPI).
-Exposes GET /predict (returns {"brightness": <float>}) and GET /health.
+Exposes GET /predict (returns {"predicted_ambient_light": <float>}) and GET /health.
 
 Design: "refit-once-serve-many"
 - Every PREDICT_INTERVAL_S (default 60s), ARIMA refits on a rolling window of ambient_light and generates a forecast cache (one point every FORECAST_STEP_S).
 - GET /predict never triggers a fit. It reads the closest cached point based on elapsed time.
 - Bias correction (EMA) and reconciliation run on a single point per refit cycle at PREDICTION_HORIZON_S.
 
-Note: ARIMA fits and bias correction operate in the "predicted ambient light" space. 
-GET /predict converts this to the artificial LED brightness target (100 - predicted ambient light).
 """
 import os
 import time
@@ -69,7 +67,7 @@ def load_reconciled_targets() -> set[str]:
     except Exception as exc:
         logger.warning("Failed to load reconciled targets: %s", exc)
         return set()
-    
+
     targets = set()
     for table in tables:
         for rec in table.records:
@@ -90,7 +88,7 @@ def read_ambient_light(window_s: int) -> list[tuple[datetime, float]]:
     except Exception as exc:
         logger.warning("InfluxDB query failed: %s", exc)
         return []
-    
+
     series: list[tuple[datetime, float]] = []
     for table in tables:
         for rec in table.records:
@@ -100,7 +98,7 @@ def read_ambient_light(window_s: int) -> list[tuple[datetime, float]]:
 def read_unreconciled_predictions() -> list[dict]:
     """Read unreconciled predictions (target_timestamp <= now)."""
     now = datetime.now(timezone.utc)
-    
+
     # InfluxDB stores fields in separate rows. pivot() combines predicted_value, target_timestamp, and horizon_s.
     flux = f"""
     from(bucket: "{INFLUXDB_BUCKET}")
@@ -116,7 +114,7 @@ def read_unreconciled_predictions() -> list[dict]:
     except Exception as exc:
         logger.warning("InfluxDB predictions query failed: %s", exc)
         return []
-    
+
     preds = []
     for table in tables:
         for rec in table.records:
@@ -130,7 +128,7 @@ def read_unreconciled_predictions() -> list[dict]:
                 target_ts = datetime.fromisoformat(ts_str)
             except ValueError:
                 continue
-            
+
             if target_ts <= now:
                 preds.append({
                     "time": rec.get_time(),
@@ -156,7 +154,7 @@ def read_actual_at(target_ts: datetime, tolerance_s: int = 15) -> float | None:
     except Exception as exc:
         logger.warning("InfluxDB actual query failed: %s", exc)
         return None
-    
+
     for table in tables:
         for rec in table.records:
             return float(rec.get_value())
@@ -195,7 +193,6 @@ class Predictor:
         self.cache_fit_ts: datetime | None = None
 
         self.last_ambient_forecast: float | None = None  # Last served value (% ambient light)
-        self.last_brightness: float | None = None        # Last served value, converted to LED target
         self.last_order: tuple | None = None
         self.ema_error: float = 0.0  # Current bias
         self.last_fit_ts: datetime | None = None
@@ -275,8 +272,11 @@ class Predictor:
 
     def current_ambient_forecast(self) -> float | None:
         """
-        Returns the cached point closest to "now" without calling ARIMA. 
-        Returns None if cache is empty. Clamps to the last value if "now" exceeds the cache.
+        Returns the cached ambient-light forecast point closest to "now",
+        without calling ARIMA. Returns None if cache is empty. Clamps to
+        the last value if "now" exceeds the cache.
+
+        NOTE: returns raw ambient light (%), NOT a brightness target.
         """
         if not self.forecast_cache or self.cache_fit_ts is None:
             return None
@@ -291,7 +291,6 @@ class Predictor:
         _, value = self.forecast_cache[idx]
 
         self.last_ambient_forecast = value
-        self.last_brightness = float(max(0.0, min(100.0, 100.0 - value)))
         return value
 
 predictor = Predictor()
@@ -301,12 +300,12 @@ async def predict_loop():
     """Periodic job: reconcile expired predictions + refit ARIMA."""
     # Initial delay to allow InfluxDB to collect data
     await asyncio.sleep(5)
-    
+
     # Load already reconciled targets to avoid recalculating EMA on old errors
     global reconciled_targets
     reconciled_targets.update(load_reconciled_targets())
     logger.info("Loaded %d already reconciled targets.", len(reconciled_targets))
-    
+
     while True:
         try:
             # 1) Reconciliation: expired predictions -> error -> update EMA
@@ -315,32 +314,32 @@ async def predict_loop():
                 ts_key = p["target_timestamp"].isoformat()
                 if ts_key in reconciled_targets:
                     continue  # Already reconciled
-                
+
                 actual = read_actual_at(p["target_timestamp"])
                 if actual is None:
                     continue  # Actual data not yet available, will retry
-                
+
                 err = actual - p["predicted_value"]
                 predictor.update_bias(err)
                 write_prediction_error(p["predicted_value"], actual, p["target_timestamp"])
                 reconciled_targets.add(ts_key)
-                
+
                 logger.info(
                     "Reconciled pred@%s: predicted=%.2f actual=%.2f err=%.2f ema_bias=%.2f",
                     p["target_timestamp"].isoformat(), p["predicted_value"], actual, err, predictor.ema_error,
                 )
-            
-            # 2) Refit: regenerates the entire forecast cache at once. 
+
+            # 2) Refit: regenerates the entire forecast cache at once.
             # GET /predict continues serving from the existing cache without blocking.
             series = read_ambient_light(HISTORY_WINDOW_S)
             result = predictor.fit(series)
             if result is not None:
                 horizon_value, horizon_ts = result
                 write_prediction(horizon_value, horizon_ts, PREDICTION_HORIZON_S)
-                
+
         except Exception as exc:
             logger.exception("predict_loop error: %s", exc)
-        
+
         await asyncio.sleep(PREDICT_INTERVAL_S)
 
 # ----------------------------- FastAPI --------------------------------
@@ -370,7 +369,7 @@ async def predict():
             status_code=503,
             content={"error": "no prediction available yet"},
         )
-    return {"brightness": predictor.last_brightness}
+    return {"predicted_ambient_light": ambient_forecast}
 
 @app.get("/health")
 async def health():
@@ -380,7 +379,6 @@ async def health():
     return {
         "status": "ok",
         "last_ambient_forecast": predictor.last_ambient_forecast,
-        "last_brightness": predictor.last_brightness,
         "last_order": list(predictor.last_order) if predictor.last_order else None,
         "ema_bias": predictor.ema_error,
         "last_fit_ts": predictor.last_fit_ts.isoformat() if predictor.last_fit_ts else None,
