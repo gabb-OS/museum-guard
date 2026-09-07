@@ -1,4 +1,5 @@
-// test-pipeline.js
+// This mockup script simulates a WoT client that tests the actuator's properties and actions.
+// Has NO ROLE in the Docker Compose setup nor profiles, just a convenience for local testing of the Node.js server and mashup app.
 
 const BASE_URL = "http://localhost:8080/actuator"
 

@@ -1,6 +1,6 @@
 /*
 Adapter for the external predictive-light service (Python/FastAPI).
-Does not calculate brightness itself; just fetches the latest prediction.
+Does not calculate brightness itself; just fetches the correct prediction.
 
 Throws an error if the request fails (service down, timeout, cold start 503),
 letting telemetryPoller.js handle the reactive fallback.

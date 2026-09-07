@@ -39,7 +39,9 @@ INFLUXDB_BUCKET = os.environ.get("INFLUXDB_BUCKET", "museumguard")
 PREDICT_INTERVAL_S = int(os.environ.get("PREDICT_INTERVAL_S", "60"))
 # Forecast cache granularity (seconds). Aligned with ambient_light telemetry polling resolution.
 FORECAST_STEP_S = int(os.environ.get("FORECAST_STEP_S", "1"))
+# Prediction horizon for reconciliation and bias correction (seconds). Default 30s.
 PREDICTION_HORIZON_S = int(os.environ.get("PREDICTION_HORIZON_S", "30"))
+# History window (i.e. last N seconds of ambient_light data) for ARIMA fit (seconds). Default 600s (10min).
 HISTORY_WINDOW_S = int(os.environ.get("HISTORY_WINDOW_S", "600"))
 EMA_ALPHA = float(os.environ.get("EMA_ALPHA", "0.3"))
 MIN_SAMPLES_TO_FIT = int(os.environ.get("MIN_SAMPLES_TO_FIT", "20"))
