@@ -26,7 +26,7 @@ services:
       - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
       - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
       - GF_INSTALL_PLUGINS=volkovlabs-form-panel
-      - GF_LOG_LEVEL=warn      # <-- aggiunta: solo warning/error, non più info
+      - GF_LOG_LEVEL=warn   
     ports:
       - "3000:3000"
     volumes:
@@ -39,13 +39,14 @@ services:
   mashup-app:
     build: ./mashup-app
     container_name: museumguard-mashup
-    ports:
-      - "3001:3001"
     volumes:
       - ./mashup-app/src:/app/src
+      # NUOVO: cartella locale dove finiscono i CSV di metrica (latency_log.csv,
+      # metrica #3 - latenza evento->notifica). Vedi services/metricsLogger.js.
+      - ./logs/mashup:/app/logs
     environment:
       - WOT_CONTROLLER_URL=http://node-wot:8080
-      - TELEMETRY_POLL_MS=${TELEMETRY_POLL_MS:-1000}
+      - TELEMETRY_POLL_MS=${TELEMETRY_POLL_MS:-5000}
       - INFLUXDB_URL=http://influxdb:8086
       - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
       - INFLUXDB_ORG=${INFLUXDB_ORG}
@@ -54,7 +55,8 @@ services:
       - TELEGRAM_BOT_CHAT_ID=${TELEGRAM_BOT_CHAT_ID}
       - PREDICTIVE_LIGHT_URL=http://predictive-light:8000
       - PREDICTIVE_LIGHT_TIMEOUT_MS=${PREDICTIVE_LIGHT_TIMEOUT_MS:-3000}
-      - MASHUP_SERVER_API_PORT=${MASHUP_SERVER_API_PORT:-3001}
+      # NUOVO: dove scrivere i CSV dentro il container (deve combaciare col volume sopra)
+      - LOG_DIR=/app/logs
     depends_on:
       - node-wot
       - influxdb
@@ -64,15 +66,20 @@ services:
   predictive-light:
     build: ./predictive-light
     container_name: museumguard-predictive-light
+    volumes:
+      # NUOVO: CSV per metriche #1 e #2 (errore ARIMA, convergenza EMA)
+      - ./logs/predictive-light:/app/logs
     environment:
       - INFLUXDB_URL=http://influxdb:8086
       - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
       - INFLUXDB_ORG=${INFLUXDB_ORG}
       - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
-      - PREDICT_INTERVAL_S=${PREDICT_INTERVAL_S:-60}
+      - PREDICT_INTERVAL_S=${PREDICT_INTERVAL_S:-5}
       - PREDICTION_HORIZON_S=${PREDICTION_HORIZON_S:-30}
       - HISTORY_WINDOW_S=${HISTORY_WINDOW_S:-600}
       - EMA_ALPHA=${EMA_ALPHA:-0.3}
+      # NUOVO
+      - LOG_DIR=/app/logs
     depends_on:
       - influxdb
     restart: unless-stopped
@@ -89,8 +96,8 @@ services:
       - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
       - INFLUXDB_ORG=${INFLUXDB_ORG}
       - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
-      # With USE_MOCKS=true (see .env) these point to the mock containers,
-      # with USE_MOCKS=false you set them to the real IPs of the ESP32 on the LAN.
+      # Con USE_MOCKS=true (vedi .env) questi puntano ai container mock,
+      # con USE_MOCKS=false li imposti agli IP reali dell'ESP32 sulla LAN.
       - ESP_SEN_ADDRESS=${ESP_SEN_ADDRESS}
       - ESP_ACT_ADDRESS=${ESP_ACT_ADDRESS}
       - COAP_PORT=${COAP_PORT}
@@ -99,17 +106,23 @@ services:
       - influxdb
     restart: unless-stopped
 
-# --- Mocks: ONLY start with `docker compose --profile mock up` ---
-# Useful when you're working without physical hardware connected (e.g., two separate PCs
-#: one runs the mocks, the other just runs node-wot pointed
-# at the real ESP).
+  # --- Mock: partono SOLO con `docker compose --profile mock up` ---
+  # Utili quando lavori senza hardware fisico collegato (es. i due PC
+  # separati: uno fa girare i mock, l'altro il solo node-wot puntato
+  # sull'ESP reale).
   esp-sen-mock:
-    # "mock" = convenient alias for "all mocks together"; "mock-sen" = just this one
+    # "mock" = alias comodo per "tutti i mock insieme"; "mock-sen" = solo questo
     profiles: ["mock", "mock-sen"]
     build: ./esp/esp-sen/mockup
     container_name: museumguard-sen-mock
-  # ports:
-  # - "5683:5683/udp" # Uncomment only for manual testing from the host
+    volumes:
+      # NUOVO: CSV per metrica #4 (ground truth theft + detections)
+      - ./logs/esp-sen-mock:/app/logs
+    environment:
+      # NUOVO
+      - LOG_DIR=/app/logs
+    # ports:
+    #   - "5683:5683/udp"   # scommenta solo per test manuali dall'host
     restart: unless-stopped
 
   esp-act-mock:
@@ -117,7 +130,7 @@ services:
     build: ./esp/esp-act/mockup
     container_name: museumguard-act-mock
     ports:
-      - "8081:80" # for manual testing from the host (optional)
+      - "8081:80"   # per test manuale dall'host (opzionale)
     restart: unless-stopped
 
 volumes:

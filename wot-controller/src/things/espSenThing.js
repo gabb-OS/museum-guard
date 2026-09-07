@@ -35,7 +35,11 @@ export async function createEspSenTD(WoT) {
                         axis: { type: "string" },
                         value: { type: "number" },
                         lat: { type: "number" },
-                        lon: { type: "number" }
+                        lon: { type: "number" },
+                        // Timestamp (epoch secondi, float) generato dal sensore/mock al
+                        // momento del rilevamento. Usato SOLO per la metrica di
+                        // latenza end-to-end evento -> notifica (test #3), opzionale.
+                        ts: { type: "number" }
                     }
                 }
             }
@@ -61,7 +65,7 @@ export async function createEspSenTD(WoT) {
             ambientLight = await getLightLevel();
             espSenThing.emitPropertyChange("ambientLight");
         } catch (err) { console.warn("[ESP_SEN] errore poll light:", err.message); }
-    }, 1000);
+    }, 2000);
     espSenThing.setPropertyReadHandler("ambientLight", async () => ambientLight);
 
     let accel = { ax: 0, ay: 0, az: 0 };
@@ -70,7 +74,7 @@ export async function createEspSenTD(WoT) {
             accel = await getAccelReading();
             espSenThing.emitPropertyChange("accelerometer");
         } catch (err) { console.warn("[ESP_SEN] errore poll accelerometro:", err.message); }
-    }, 1000);
+    }, 2000);
     espSenThing.setPropertyReadHandler("accelerometer", async () => accel);
 
     let thresholds = { impact: 0, theft_displacement: 0 };
@@ -105,9 +109,9 @@ export async function createEspSenTD(WoT) {
 
     subscribeToAlarmEvents(
         (evt) => {
-            // The mock can accumulate multiple events between one CoAP notification and
-            // the next and send them as an array: the alarmEvent TD pattern
-            // however, expects a single object, so we emit them one by one.
+            // Il mock puo' accumulare piu' eventi tra una notifica CoAP e
+            // l'altra e inviarli come array: lo schema TD di alarmEvent si
+            // aspetta pero' un oggetto singolo, quindi li emettiamo uno a uno.
             const events = Array.isArray(evt) ? evt : [evt];
             events.forEach((e) => espSenThing.emitEvent("alarmEvent", e));
         },
