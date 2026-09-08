@@ -11,30 +11,9 @@
 
 ### General Architecture
 
-```text
-  +------------------+        CoAP       +--------------------+
-  | ESP-SEN (Sensing)| <---------------->|                    |
-  +------------------+                   |   WoT Controller   |
-  +------------------+        HTTP       |                    |
-  | ESP-ACT (Actuat.)| <---------------->+---------+----------+
-  +------------------+                             |
-                                                   v
-                                         +----------------------+
-                                         |  Mash-up Application |
-                                         +----+---------+---+---+
-                                              |       |     |
-                             +----------------+       |     +----------+
-                             |                        |                |
-                             v                        v                v
-                       +----------+           +--------------------+ +------------+
-                       | InfluxDB | <-------> | predictive-light   | | Telegram   |
-                       +----+-----+           | (Python/FastAPI)   | | Alert Bot  |
-                            |                 +--------------------+ +------------+
-                            v
-                       +----------+
-                       | Grafana  |
-                       +----------+
-```
+<div align="center">
+  <img height="450" alt="Architetture" src="https://github.com/user-attachments/assets/2c0f9d53-d61a-45db-9a5d-8eb595b771d8" />
+</div>
 
 The sensing and actuation nodes never communicate directly with each other: flow orchestration and application logic are handled by the **WoT Controller** and the **Mash-up** application. The `predictive-light` service reads history from InfluxDB and is only queried by the Mash-up to obtain the brightness estimate — it never talks directly to the devices.
 
