@@ -13,19 +13,19 @@
 
 ```text
   +------------------+        CoAP       +--------------------+
-  | ESP-SEN (Sensing)| ----------------> |                    |
+  | ESP-SEN (Sensing)| <---------------->|                    |
   +------------------+                   |   WoT Controller   |
   +------------------+        HTTP       |                    |
-  | ESP-ACT (Actuat.)| <-----------------+---------+----------+
+  | ESP-ACT (Actuat.)| <---------------->+---------+----------+
   +------------------+                             |
                                                    v
                                          +----------------------+
                                          |  Mash-up Application |
                                          +----+---------+---+---+
-                                              |         |   |
-                             +----------------+         |   +------------+
-                             |                          |                |
-                             v                          v                v
+                                              |       |     |
+                             +----------------+       |     +----------+
+                             |                        |                |
+                             v                        v                v
                        +----------+           +--------------------+ +------------+
                        | InfluxDB | <-------> | predictive-light   | | Telegram   |
                        +----+-----+           | (Python/FastAPI)   | | Alert Bot  |
@@ -97,10 +97,9 @@ Standalone Python/FastAPI microservice (`predictive-light/App.py`), containerize
 * Every `PREDICT_INTERVAL_S` seconds (default `60`) it re-fits an **ARIMA** model (`pmdarima`) on the rolling window of `ambient_light` read from InfluxDB (`HISTORY_WINDOW_S` seconds), and in a single pass generates an **array of future forecasts** (`forecast_cache`), one every `FORECAST_STEP_S` seconds (default `1`), covering the interval up to the next refit.
 * `GET /predict` **never re-fits** the model: it only computes how much time has elapsed since the last refit and returns the cache point closest to "now" — near-zero computational cost, regardless of how often the Mash-up polls the endpoint.
 * Applies an **adaptive bias correction**: it maintains an EMA (`EMA_ALPHA`) over past forecast errors. Reconciliation still operates on a single reference point per refit cycle, selected at `PREDICTION_HORIZON_S` seconds after the fit (dedicated `prediction_error` measurement); that point is now extracted from the cache instead of being the sole output of the fit, but the reconciliation logic itself is unchanged.
-* Exposes `GET /predict` → `{"brightness": <float>}` (LED target, complementary to the predicted ambient light) and `GET /health` for diagnostics (also includes `forecast_cache_points` and `forecast_cache_age_s`); returns `503` until a valid fit is available, so the Mash-up falls back to the reactive rule.
+* Exposes `GET /predict` → `{"predicted_ambient_light": <float>}` (Photoresistor target, predicted ambient light) and `GET /health` for diagnostics (also includes `forecast_cache_points` and `forecast_cache_age_s`); returns `503` until a valid fit is available, so the Mash-up falls back to the reactive rule.
 * Writes both the forecasts (`predicted_light`) and the reconciliation errors (`prediction_error`) to InfluxDB, both viewable in Grafana and tagged with `system=museumguard`, consistent with the rest of the measurements written by the Mash-up.
 
-> Design note: the fit/reconciliation always operate in the "predicted ambient light" space (directly comparable 1:1 with the real `ambient_light` in the dedicated Grafana panel); only the value returned by `/predict` is converted into the artificial brightness target (inverse relation: the higher the predicted ambient light, the lower the artificial illumination required).
 
 ### 6. Data Storage & Visualization
 
@@ -118,6 +117,7 @@ Standalone Python/FastAPI microservice (`predictive-light/App.py`), containerize
 * **Configurable Detection Thresholds:** runtime updates of the impact (`thresholds/impact`) and theft (`thresholds/theft`) thresholds through the WoT Controller, without firmware recompilation, with range validated on the firmware side (`THRESHOLD_MIN`–`THRESHOLD_MAX`, 0.05–5.00 g).
 * **Predictive Lighting Control:** ARIMA model with adaptive bias correction and a "refit-once, serve-many" architecture (periodic refit every `PREDICT_INTERVAL_S`, predictions served with `FORECAST_STEP_S` granularity from an in-memory cache) that estimates ambient light over the next `PREDICTION_HORIZON_S` seconds and proactively regulates the PWM LED, with automatic reactive fallback if the predictive service is unavailable.
 * **Telegram Alert Bot:** instant notifications in case of emergency (impact/theft).
+* **GPS:** To make the prototype more realistic, it was decided to add a GPS to provide the artwork's location in the event of theft. 
 
 ---
 
