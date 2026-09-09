@@ -185,7 +185,6 @@ void taskAmbientLight(void *pvParameters){
  *     value) has already been cleared, ready to accumulate new bits.
  */
 void taskAlarmLedManager(void *pvParameters) {
-void taskAlarmLedManager(void *pvParameters) {
     alarm_state_t state = STATE_IDLE;
     uint32_t notified_bits; 
     bool is_led_on = false;
