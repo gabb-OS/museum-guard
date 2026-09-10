@@ -97,13 +97,19 @@ void wifi_init_sta(void)
 /* ---------------- Helper functions ---------------- */
 static esp_err_t send_cjson_response(httpd_req_t *req, cJSON *root)
 {
-    char *json_string = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root); // Clean up the JSON object now that we have the string
+    char json_buffer[256]; // Buffer preallocato nello stack, zero malloc!
+    char *json_string = cJSON_PrintBuffered(root, sizeof(json_buffer), false);
 
     if (json_string == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for JSON response");
+        ESP_LOGE("HTTP", "JSON buffer too small");
+        cJSON_Delete(root);
         return httpd_resp_send_500(req);
     }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json_string, strlen(json_string));
+    cJSON_Delete(root);
+    // NON fare free(json_string) se è stato usato il buffer preallocato
 
     httpd_resp_set_type(req, "application/json");
     esp_err_t err = httpd_resp_sendstr(req, json_string);

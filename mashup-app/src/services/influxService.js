@@ -83,6 +83,10 @@ export async function writePosition({ lat, lon }) {
     );
 }
 
+export async function writePredictedLight(value) {
+    safeWrite(new Point("predicted_light").floatField("value", value));
+}
+
 export async function closeInflux() {
     await writeApi.close();
 }

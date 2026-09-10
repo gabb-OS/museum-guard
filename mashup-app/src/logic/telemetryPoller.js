@@ -19,7 +19,7 @@ cycle and doesn't hide unrelated data that was successfully read in the
 same tick (e.g. sensor readings that DID succeed).
 */
 
-import { writeTelemetry, writeThresholds } from "../services/influxService.js";
+import { writeTelemetry, writeThresholds, writePredictedLight } from "../services/influxService.js";
 import { getPredictedAmbientLight } from "../services/predictiveLightService.js";
 import { config } from "../config.js";
 
@@ -94,11 +94,24 @@ export function startTelemetryPolling(sensor, actuator) {
         // Ambient light estimate to use for the regulation: predicted
         // if available, otherwise the real current reading.
         let ambientEstimate;
+        let predictionOk = false;
         try {
             ambientEstimate = await getPredictedAmbientLight();
+            predictionOk = true;
         } catch (err) {
             console.warn(`[TELEMETRY][${tickStart}] predictive-light unavailable, using reactive fallback:`, err.message);
             ambientEstimate = lightSens;
+        }
+
+        // Write the predicted value to Influx only when it's genuinely from the
+        // predictive service (not the fallback), so predicted_light only ever
+        // contains real predictions, never a copy of the reactive reading.
+        if (predictionOk) {
+            try {
+                await writePredictedLight(ambientEstimate);
+            } catch (err) {
+                console.warn(`[TELEMETRY][${tickStart}] writePredictedLight failed:`, err.message);
+            }
         }
 
         // Single conversion point, always applied here. Single invokeAction per cycle.

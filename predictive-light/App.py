@@ -272,11 +272,9 @@ class Predictor:
 
     def current_ambient_forecast(self) -> float | None:
         """
-        Returns the cached ambient-light forecast point closest to "now",
-        without calling ARIMA. Returns None if cache is empty. Clamps to
-        the last value if "now" exceeds the cache.
-
-        NOTE: returns raw ambient light (%), NOT a brightness target.
+        Returns the cached ambient-light forecast point closest to "now".
+        After the first fit, NEVER returns None - always serves the last valid value
+        if cache is expired, avoiding gaps in predictions.
         """
         if not self.forecast_cache or self.cache_fit_ts is None:
             return None
@@ -284,11 +282,18 @@ class Predictor:
         now = datetime.now(timezone.utc)
         elapsed = (now - self.cache_fit_ts).total_seconds()
 
-        # Index on the regular FORECAST_STEP_S grid, clamped to bounds
+        # Index on the regular FORECAST_STEP_S grid
         idx = int(round(elapsed / FORECAST_STEP_S)) - 1
-        idx = max(0, min(len(self.forecast_cache) - 1, idx))
-
-        _, value = self.forecast_cache[idx]
+        
+        # CLAMP: Se siamo fuori dalla cache, usa l'ultimo valore disponibile
+        # invece di tornare None (evita gap nel grafico)
+        if idx >= len(self.forecast_cache):
+            # Cache expired: serve last valid value
+            _, value = self.forecast_cache[-1]
+        elif idx < 0:
+            _, value = self.forecast_cache[0]
+        else:
+            _, value = self.forecast_cache[idx]
 
         self.last_ambient_forecast = value
         return value
@@ -296,51 +301,71 @@ class Predictor:
 predictor = Predictor()
 
 # ----------------------------- Background loop ------------------------
+def run_refit_cycle():
+    """
+    Un intero ciclo di reconciliation + refit ARIMA + write.
+    Tutta roba SINCRONA e potenzialmente lenta (query Influx, pm.auto_arima,
+    write Influx). Viene lanciata dentro un thread via asyncio.to_thread()
+    cosi' l'event loop resta libero di rispondere a GET /predict (che legge
+    solo dalla cache, in memoria) mentre questo gira.
+    """
+    # 1) Reconciliation
+    preds = read_unreconciled_predictions()
+    for p in preds:
+        ts_key = p["target_timestamp"].isoformat()
+        if ts_key in reconciled_targets:
+            continue
+        actual = read_actual_at(p["target_timestamp"])
+        if actual is None:
+            continue
+        err = actual - p["predicted_value"]
+        predictor.update_bias(err)
+        write_prediction_error(p["predicted_value"], actual, p["target_timestamp"])
+        reconciled_targets.add(ts_key)
+        logger.info(
+            "Reconciled pred@%s: predicted=%.2f actual=%.2f err=%.2f ema_bias=%.2f",
+            p["target_timestamp"].isoformat(), p["predicted_value"], actual, err, predictor.ema_error,
+        )
+
+    # 2) Refit
+    series = read_ambient_light(HISTORY_WINDOW_S)
+    result = predictor.fit(series)
+    if result is not None:
+        horizon_value, horizon_ts = result
+        write_prediction(horizon_value, horizon_ts, PREDICTION_HORIZON_S)
+
+
 async def predict_loop():
     """Periodic job: reconcile expired predictions + refit ARIMA."""
-    # Initial delay to allow InfluxDB to collect data
     await asyncio.sleep(5)
-
-    # Load already reconciled targets to avoid recalculating EMA on old errors
+    
     global reconciled_targets
     reconciled_targets.update(load_reconciled_targets())
     logger.info("Loaded %d already reconciled targets.", len(reconciled_targets))
-
+    
     while True:
         try:
-            # 1) Reconciliation: expired predictions -> error -> update EMA
-            preds = read_unreconciled_predictions()
-            for p in preds:
-                ts_key = p["target_timestamp"].isoformat()
-                if ts_key in reconciled_targets:
-                    continue  # Already reconciled
-
-                actual = read_actual_at(p["target_timestamp"])
-                if actual is None:
-                    continue  # Actual data not yet available, will retry
-
-                err = actual - p["predicted_value"]
-                predictor.update_bias(err)
-                write_prediction_error(p["predicted_value"], actual, p["target_timestamp"])
-                reconciled_targets.add(ts_key)
-
-                logger.info(
-                    "Reconciled pred@%s: predicted=%.2f actual=%.2f err=%.2f ema_bias=%.2f",
-                    p["target_timestamp"].isoformat(), p["predicted_value"], actual, err, predictor.ema_error,
-                )
-
-            # 2) Refit: regenerates the entire forecast cache at once.
-            # GET /predict continues serving from the existing cache without blocking.
-            series = read_ambient_light(HISTORY_WINDOW_S)
-            result = predictor.fit(series)
-            if result is not None:
-                horizon_value, horizon_ts = result
-                write_prediction(horizon_value, horizon_ts, PREDICTION_HORIZON_S)
-
+            # Eseguito in un worker thread: non blocca piu' l'event loop,
+            # quindi GET /predict resta reattivo durante tutto il refit
+            # (query Influx + ARIMA fit + write), niente piu' buchi nella
+            # serie servita al polling esterno.
+            await asyncio.to_thread(run_refit_cycle)
         except Exception as exc:
             logger.exception("predict_loop error: %s", exc)
-
-        await asyncio.sleep(PREDICT_INTERVAL_S)
+        
+        # Calcola quando fare il prossimo refit
+        # Anticipa il refit di 10 secondi per dare tempo ad ARIMA di completare
+        REFIT_ADVANCE_S = 10
+        if predictor.cache_fit_ts is not None:
+            next_refit_time = predictor.cache_fit_ts + timedelta(seconds=PREDICT_INTERVAL_S - REFIT_ADVANCE_S)
+            now = datetime.now(timezone.utc)
+            sleep_time = (next_refit_time - now).total_seconds()
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
+            else:
+                await asyncio.sleep(1)  # Fallback minimo
+        else:
+            await asyncio.sleep(PREDICT_INTERVAL_S)
 
 # ----------------------------- FastAPI --------------------------------
 @asynccontextmanager
