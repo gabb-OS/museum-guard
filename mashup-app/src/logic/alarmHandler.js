@@ -15,10 +15,10 @@ export function registerAlarmHandler(sensor, actuator) {
 
         try {
             if (event.type === "impact") {
-            await writeEvent(event);
-            await actuator.invokeAction("triggerImpactBlink");
-            await sendAlertToBot(`IMPACT detected (axis ${event.axis}, value ${event.value})`);
-
+                await writeEvent(event);
+                await actuator.invokeAction("triggerImpactBlink");
+                await sendAlertToBot(`IMPACT detected (axis ${event.axis}, value ${event.value})`);
+                
             } else if (event.type === "theft") {
                 await writeEvent(event);
                 await actuator.invokeAction("triggerTheftAlarm");

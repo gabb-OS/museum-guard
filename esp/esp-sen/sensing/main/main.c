@@ -24,8 +24,9 @@
 #define GPS_TX_PIN     GPIO_NUM_17
 #define GPS_RX_PIN     GPIO_NUM_16
 #define GPS_BAUD_RATE  9600
-#define GPS_PING_INTERVAL_MS 5000
-#define GPS_WARMUP_INTERVAL_MS 2000  
+#define GPS_PING_INTERVAL_MS      5000   // during tracking (theft)
+#define GPS_WARMUP_INTERVAL_MS    2000   // cold start, before the first fix
+#define GPS_IDLE_INTERVAL_MS      10000  // idle, after the first fix, no theft
 
 // global alert state
 static bool g_tracking_active = false;
@@ -206,6 +207,7 @@ void gps_ping_task(void *pvParameters) {
     bool last_tracking = false;
     bool last_has_fix = false;
     int warmup_no_fix_counter = 0;
+    bool ever_had_fix = false;
 
     ESP_LOGI("GPS", "Task avviata. Modulo GPS in riscaldamento (warmup)...");
 
@@ -229,6 +231,8 @@ void gps_ping_task(void *pvParameters) {
         // 2. Read GPS
         float lat = 0.0, lon = 0.0;
         bool has_fix = read_gps(&lat, &lon);
+
+        if (has_fix) ever_had_fix = true;
 
         // 3. Log ONLY when the Fix status changes (avoid spam)
         if (has_fix != last_has_fix) {
@@ -265,7 +269,15 @@ void gps_ping_task(void *pvParameters) {
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(tracking ? GPS_PING_INTERVAL_MS : GPS_WARMUP_INTERVAL_MS));
+        TickType_t interval;
+        if (tracking) {
+            interval = GPS_PING_INTERVAL_MS;
+        } else if (!ever_had_fix) {
+            interval = GPS_WARMUP_INTERVAL_MS;   // cold start, we are searching for satellite
+        } else {
+            interval = GPS_IDLE_INTERVAL_MS;     // we have had a fix so we can low down
+        }
+        vTaskDelay(pdMS_TO_TICKS(interval));
     }
 }
 
