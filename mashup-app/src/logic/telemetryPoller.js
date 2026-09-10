@@ -11,6 +11,12 @@ prevent conflicts and drift between the predictive and fallback paths:
   3. In BOTH cases, the resulting ambient light estimate (predicted or
      real) is passed through computeTargetBrightness (100 - x) exactly
      once, here, to obtain the final target sent to the actuator.
+
+Error handling: each group of reads (sensor / actuator / thresholds) is
+wrapped in its own try/catch. This way a single failing readProperty
+(e.g. the actuator being briefly unreachable) doesn't abort the whole
+cycle and doesn't hide unrelated data that was successfully read in the
+same tick (e.g. sensor readings that DID succeed).
 */
 
 import { writeTelemetry, writeThresholds } from "../services/influxService.js";
@@ -25,42 +31,91 @@ function computeTargetBrightness(ambientLightPct) {
 
 export function startTelemetryPolling(sensor, actuator) {
     let lastBrightnessSent = null;
+    let consecutiveErrors = 0;
 
     setInterval(async () => {
+        const tickStart = new Date().toISOString();
+
+        let lightSens, accelSens;
+        let alarmState, artworkBrightness;
+        let thresholds;
+
+        // --- Sensor reads (ambient light + accelerometer) ---
         try {
-            // Read sensor data
-            const lightSens = await (await sensor.readProperty("ambientLight")).value();
-            const accelSens = await (await sensor.readProperty("accelerometer")).value();
+            lightSens = await (await sensor.readProperty("ambientLight")).value();
+            accelSens = await (await sensor.readProperty("accelerometer")).value();
+        } catch (err) {
+            consecutiveErrors++;
+            console.warn(`[TELEMETRY][${tickStart}] sensor read failed (#${consecutiveErrors}):`, err.message);
+        }
 
-            // Read actuator data (artworkLedBrightness per TD)
-            const alarmState = await (await actuator.readProperty("alarmLightState")).value();
-            const artworkBrightness = await (await actuator.readProperty("artworkLedBrightness")).value();
+        // --- Actuator reads (alarm state + brightness) ---
+        try {
+            alarmState = await (await actuator.readProperty("alarmLightState")).value();
+            artworkBrightness = await (await actuator.readProperty("artworkLedBrightness")).value();
+        } catch (err) {
+            consecutiveErrors++;
+            console.warn(`[TELEMETRY][${tickStart}] actuator read failed (#${consecutiveErrors}):`, err.message);
+        }
 
-            const thresholds = await (await sensor.readProperty("thresholds")).value();
+        // --- Thresholds read ---
+        try {
+            thresholds = await (await sensor.readProperty("thresholds")).value();
+        } catch (err) {
+            consecutiveErrors++;
+            console.warn(`[TELEMETRY][${tickStart}] thresholds read failed (#${consecutiveErrors}):`, err.message);
+        }
 
-            await writeTelemetry({ lightSens, accelSens, alarmState, artworkBrightness });
-            await writeThresholds(thresholds);
-
-            // Ambient light estimate to use for the regulation: predicted
-            // if available, otherwise the real current reading.
-            let ambientEstimate;
+        // --- Persist whatever we managed to read this tick ---
+        if (lightSens !== undefined && accelSens !== undefined && alarmState !== undefined && artworkBrightness !== undefined) {
             try {
-                ambientEstimate = await getPredictedAmbientLight();
+                await writeTelemetry({ lightSens, accelSens, alarmState, artworkBrightness });
             } catch (err) {
-                console.warn("[TELEMETRY] predictive-light unavailable, using reactive fallback:", err.message);
-                ambientEstimate = lightSens;
+                console.warn(`[TELEMETRY][${tickStart}] writeTelemetry failed:`, err.message);
             }
+        } else {
+            console.warn(`[TELEMETRY][${tickStart}] skipping writeTelemetry: incomplete data this tick`);
+        }
 
-            // Single conversion point, always applied here. Single invokeAction per cycle.
-            const target = computeTargetBrightness(ambientEstimate);
+        if (thresholds !== undefined) {
+            try {
+                await writeThresholds(thresholds);
+            } catch (err) {
+                console.warn(`[TELEMETRY][${tickStart}] writeThresholds failed:`, err.message);
+            }
+        }
 
-            if (target !== lastBrightnessSent) {
+        // --- Brightness regulation: only possible if we have a sensor reading ---
+        if (lightSens === undefined) {
+            console.warn(`[TELEMETRY][${tickStart}] skipping brightness regulation: no ambient light reading available`);
+            return;
+        }
+
+        // Ambient light estimate to use for the regulation: predicted
+        // if available, otherwise the real current reading.
+        let ambientEstimate;
+        try {
+            ambientEstimate = await getPredictedAmbientLight();
+        } catch (err) {
+            console.warn(`[TELEMETRY][${tickStart}] predictive-light unavailable, using reactive fallback:`, err.message);
+            ambientEstimate = lightSens;
+        }
+
+        // Single conversion point, always applied here. Single invokeAction per cycle.
+        const target = computeTargetBrightness(ambientEstimate);
+
+        if (target !== lastBrightnessSent) {
+            try {
                 await actuator.invokeAction("regulateBrightness", target);
                 lastBrightnessSent = target;
+                consecutiveErrors = 0; // reset once a full cycle succeeds end-to-end
+            } catch (err) {
+                consecutiveErrors++;
+                console.warn(`[TELEMETRY][${tickStart}] regulateBrightness failed (#${consecutiveErrors}):`, err.message);
             }
-
-        } catch (err) {
-            console.warn("[TELEMETRY] polling error:", err.message);
+        } else {
+            consecutiveErrors = 0;
         }
+
     }, config.telemetryPollMs);
 }

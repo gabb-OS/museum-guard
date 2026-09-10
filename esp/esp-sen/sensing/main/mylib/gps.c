@@ -41,9 +41,21 @@ bool read_gps(float *lat, float *lon) {
     if (len <= 0) return false;
     g_line_buf[len] = '\0';
 
-    char *sentence = strstr(g_line_buf, "GGA");
-    if (!sentence) return false;
-    sentence -= 2; // go back to "$Gx" before "GGA"
+    char *gga = strstr(g_line_buf, "GGA");
+    if (!gga) return false;
+
+    // "$XXGGA" -> servono almeno 3 caratteri prima di "GGA" per il talker ID + '$'.
+    // Se il chunk UART inizia a meta' sentence, scartiamo: aspettiamo il prossimo giro.
+    if (gga - g_line_buf < 3) {
+        ESP_LOGW(TAG, "Sentence GGA troncata a inizio buffer, scarto questo giro");
+        return false;
+    }
+
+    char *sentence = gga - 3;
+    if (sentence[0] != '$') {
+        ESP_LOGW(TAG, "Header sentence non valido, scarto");
+        return false;
+    }
 
     char *fields[15] = {0};
     int nfields = 0;
@@ -53,8 +65,13 @@ bool read_gps(float *lat, float *lon) {
         tok = strtok(NULL, ",");
     }
 
-    // fields[2]=lat, fields[3]=N/S, fields[4]=lon, fields[5]=E/W, fields[6]=fix quality
-    if (nfields < 7 || strlen(fields[2]) == 0 || strlen(fields[4]) == 0 || atoi(fields[6]) == 0) {
+    if (nfields < 7 || strlen(fields[2]) == 0 || strlen(fields[4]) == 0) {
+        return false;
+    }
+
+    // Validazione robusta del campo fix quality: deve essere un singolo digit,
+    // non un atoi() su una stringa potenzialmente sporca.
+    if (strlen(fields[6]) != 1 || !isdigit((unsigned char)fields[6][0]) || fields[6][0] == '0') {
         return false; // nessun fix
     }
 

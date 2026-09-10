@@ -5,22 +5,48 @@ const DEFAULT_PORT = parseInt(process.env.HTTP_PORT || "80", 10);
 const DEFAULT_BASE = `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
 const REQUEST_TIMEOUT_MS = 3000; // regolabile
 
+let requestQueue = Promise.resolve();
+
+function serialize(fn) {
+    const result = requestQueue.then(fn, fn);
+    // Previene la rottura della coda se una richiesta fallisce
+    requestQueue = result.catch(() => {}); 
+    return result;
+}
+
+let inFlightState = null;
+
+
 export async function getActuatorState(base = DEFAULT_BASE) {
-    try {
-        const resp = await axios.get(`${base}/state`, { timeout: REQUEST_TIMEOUT_MS });
-        return resp.data;
-    } catch (err) {
-        handleDeviceError(err, " fetching actuator state");
-    }
+    // Se c'è già una richiesta in volo, restituisci quella (zero chiamate HTTP extra)
+    if (inFlightState) return inFlightState;
+
+    // Altrimenti, crea una nuova richiesta e mettila in coda
+    inFlightState = serialize(async () => {
+        try {
+            const resp = await axios.get(`${base}/state`, { timeout: REQUEST_TIMEOUT_MS });
+            return resp.data;
+        } catch (err) {
+            handleDeviceError(err, "fetching actuator state");
+            throw err;
+        } finally {
+            inFlightState = null; // Libera il lock per la prossima lettura
+        }
+    });
+
+    return inFlightState;
 }
 
 export async function setBrightness(value, base = DEFAULT_BASE) {
-    const safeValue = Math.min(100, Math.max(0, value));
-    try {
-        await axios.post(`${base}/ambientlight`, { brightness: safeValue }, { timeout: REQUEST_TIMEOUT_MS });
-    } catch (err) {
-        handleDeviceError(err, "setting brightness");
-    }
+    return serialize(async () => {
+        const safeValue = Math.min(100, Math.max(0, value));
+        try {
+            await axios.post(`${base}/ambientlight`, { brightness: safeValue }, { timeout: REQUEST_TIMEOUT_MS });
+        } catch (err) {
+            handleDeviceError(err, "setting brightness");
+            throw err;
+        }
+    });
 }
 
 export async function startBlink(base = DEFAULT_BASE) {
@@ -32,31 +58,34 @@ export async function startBlink(base = DEFAULT_BASE) {
 }
 
 export async function activateAlarm(base = DEFAULT_BASE) {
-    try {
-        await axios.post(`${base}/theft`, null, { timeout: REQUEST_TIMEOUT_MS });
-    } catch (err) {
-        handleDeviceError(err, "activating Theft Alarm");
-    }
+    return serialize(async () => {
+        try {
+            await axios.post(`${base}/theft`, {}, { timeout: REQUEST_TIMEOUT_MS });
+        } catch (err) {
+            handleDeviceError(err, "activating theft alarm");
+            throw err;
+        }
+    });
 }
+
 
 export async function resetAlarms(base = DEFAULT_BASE) {
-    try {
-        await axios.post(`${base}/reset`, null, { timeout: REQUEST_TIMEOUT_MS });
-    } catch (err) {
-        handleDeviceError(err, "resetting alarms");
-    }
+    return serialize(async () => {
+        try {
+            await axios.post(`${base}/reset`, {}, { timeout: REQUEST_TIMEOUT_MS });
+        } catch (err) {
+            handleDeviceError(err, "resetting alarms");
+            throw err;
+        }
+    });
 }
 
-function handleDeviceError(err, actionDescription) {
+function handleDeviceError(err, context) {
     if (err.response) {
-        const deviceMsg = err.response.data?.message || 'No additional info';
-        throw new Error(`ESP32 Error (${actionDescription}): Device returned ${err.response.status} - ${deviceMsg}`);
-    } else if (err.code === "ECONNABORTED") {
-        // axios usa questo codice specifico quando scatta il timeout
-        throw new Error(`ESP32 Error (${actionDescription}): Device timed out after ${REQUEST_TIMEOUT_MS}ms.`);
+        console.error(`[ESP_ACT] Device error ${context}: ${err.response.status} - ${err.response.statusText}`);
     } else if (err.request) {
-        throw new Error(`ESP32 Error (${actionDescription}): Device is unreachable or offline.`);
+        console.error(`[ESP_ACT] Network error ${context}: No response received`);
     } else {
-        throw new Error(`ESP32 Error (${actionDescription}): ${err.message}`);
+        console.error(`[ESP_ACT] Error ${context}:`, err.message);
     }
 }
