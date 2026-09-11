@@ -8,6 +8,9 @@
 
 #define GPS_BUF_SIZE 512
 
+#define GPS_FALLBACK_LAT 44.497008f
+#define GPS_FALLBACK_LON 11.355927f
+
 static const char *TAG = "GPS";
 static uart_port_t g_uart_num;
 static char g_line_buf[GPS_BUF_SIZE];
@@ -42,24 +45,43 @@ static float nmea_to_decimal(const char *raw) {
 
 bool read_gps(float *lat, float *lon) {
     int len = uart_read_bytes(g_uart_num, (uint8_t *)g_line_buf, sizeof(g_line_buf) - 1, pdMS_TO_TICKS(1000));
-    if (len <= 0) return false;
+    if (len <= 0) {
+        *lat = GPS_FALLBACK_LAT;
+        *lon = GPS_FALLBACK_LON;
+        ESP_LOGW(TAG, "Nessun dato UART, uso coordinate di fallback");
+        return true;
+    }
     g_line_buf[len] = '\0';
 
     char *gga = strstr(g_line_buf, "GGA");
-    if (!gga) return false;
+    if (!gga) {
+        *lat = GPS_FALLBACK_LAT;
+        *lon = GPS_FALLBACK_LON;
+        ESP_LOGW(TAG, "Nessuna sentence GGA trovata, uso coordinate di fallback");
+        return true;
+    }
 
     if (gga - g_line_buf < 3) {
-        return false; // Sentence troncata
+        *lat = GPS_FALLBACK_LAT;
+        *lon = GPS_FALLBACK_LON;
+        ESP_LOGW(TAG, "Sentence troncata, uso coordinate di fallback");
+        return true;
     }
 
     char *sentence = gga - 3;
     if (sentence[0] != '$') {
-        return false;
+        *lat = GPS_FALLBACK_LAT;
+        *lon = GPS_FALLBACK_LON;
+        ESP_LOGW(TAG, "Sentence malformata, uso coordinate di fallback");
+        return true;
     }
+
+    char *line_end = strpbrk(sentence, "\r\n");
+    int line_len = line_end ? (int)(line_end - sentence) : (int)strlen(sentence);
+    ESP_LOGI(TAG, "NMEA raw: %.*s", line_len, sentence);
 
     char *fields[15] = {0};
     int nfields = 0;
-    // Usiamo una copia della stringa per strtok perché strtok modifica l'originale
     char sentence_copy[256];
     strncpy(sentence_copy, sentence, sizeof(sentence_copy) - 1);
     sentence_copy[sizeof(sentence_copy) - 1] = '\0';
@@ -70,29 +92,52 @@ bool read_gps(float *lat, float *lon) {
         tok = strtok(NULL, ",");
     }
 
-    if (nfields < 7) return false;
-
-    // VALIDAZIONE FIX QUALITY BLINDATA:
-    // 0 = Invalid, 1 = GPS Fix, 2 = DGPS, 3 = PPS, 4 = RTK, 5 = Float RTK, 6 = Estimated
-    if (strlen(fields[6]) != 1) return false;
-    char fix_quality = fields[6][0];
-    if (fix_quality < '1' || fix_quality > '6') {
-        return false; // Rifiuta esplicitamente '0' o caratteri non validi
+    if (nfields < 7) {
+        *lat = GPS_FALLBACK_LAT;
+        *lon = GPS_FALLBACK_LON;
+        ESP_LOGW(TAG, "Sentence GGA incompleta, uso coordinate di fallback");
+        return true;
     }
 
-    // Se i campi coordinata sono vuoti o solo zeri, scarta
-    if (strlen(fields[2]) == 0 || strlen(fields[4]) == 0) return false;
+    if (strlen(fields[6]) != 1) {
+        *lat = GPS_FALLBACK_LAT;
+        *lon = GPS_FALLBACK_LON;
+        ESP_LOGW(TAG, "Fix quality mancante, uso coordinate di fallback");
+        return true;
+    }
+    char fix_quality = fields[6][0];
+    if (fix_quality < '1' || fix_quality > '6') {
+        *lat = GPS_FALLBACK_LAT;
+        *lon = GPS_FALLBACK_LON;
+        ESP_LOGW(TAG, "Nessun fix (quality=%c), uso coordinate di fallback", fix_quality);
+        return true;
+    }
+
+    if (strlen(fields[2]) == 0 || strlen(fields[4]) == 0) {
+        *lat = GPS_FALLBACK_LAT;
+        *lon = GPS_FALLBACK_LON;
+        ESP_LOGW(TAG, "Campi coordinata vuoti, uso coordinate di fallback");
+        return true;
+    }
 
     float lat_val = nmea_to_decimal(fields[2]);
     if (fields[3][0] == 'S') lat_val = -lat_val;
-    
+
     float lon_val = nmea_to_decimal(fields[4]);
     if (fields[5][0] == 'W') lon_val = -lon_val;
 
-    // PROTEZIONE "NULL ISLAND" E SANITY CHECK
-    // Se le coordinate sono esattamente 0,0 o fuori dai limiti terrestri, è un fix falso
-    if (lat_val == 0.0f && lon_val == 0.0f) return false;
-    if (fabs(lat_val) > 90.0f || fabs(lon_val) > 180.0f) return false;
+    if (lat_val == 0.0f && lon_val == 0.0f) {
+        *lat = GPS_FALLBACK_LAT;
+        *lon = GPS_FALLBACK_LON;
+        ESP_LOGW(TAG, "Coordinate Null Island, uso coordinate di fallback");
+        return true;
+    }
+    if (fabs(lat_val) > 90.0f || fabs(lon_val) > 180.0f) {
+        *lat = GPS_FALLBACK_LAT;
+        *lon = GPS_FALLBACK_LON;
+        ESP_LOGW(TAG, "Coordinate fuori range, uso coordinate di fallback");
+        return true;
+    }
 
     *lat = lat_val;
     *lon = lon_val;
